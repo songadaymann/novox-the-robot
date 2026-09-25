@@ -5,6 +5,7 @@
 #include <sstream>
 #include <string>
 
+#include "import.hpp"
 #include "json.hpp"
 #include "lexicon.hpp"
 #include "planner.hpp"
@@ -51,6 +52,7 @@ extern "C" {
 nvs_engine* nvs_create(double sample_rate) {
   auto* e = new nvs_engine;
   if (sample_rate > 0) e->sampleRate = sample_rate;
+  e->lexicon.loadEmbedded();  // no-op in builds without an embedded dictionary
   return e;
 }
 
@@ -99,6 +101,45 @@ char* nvs_plan(nvs_engine* e, const char* score_json) {
   return dupString(nvs::planToJson(nvs::planScore(score, lex)));
 }
 
+char* nvs_import(nvs_engine* e, const void* data, size_t size, const char* options_json) {
+  if (!data || size == 0) {
+    e->error = "no data to import";
+    return nullptr;
+  }
+  try {
+    nvs::ImportOptions opts;
+    std::string voice;
+    if (options_json && *options_json) {
+      nvs::json::Value o = nvs::json::parse(options_json);
+      opts.track = static_cast<int>(o.num("track", -1));
+      opts.lyrics = o.str("lyrics", "");
+      voice = o.str("voice", "");
+    }
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    std::vector<std::string> warnings;
+    nvs::Score score = nvs::importAny(std::vector<uint8_t>(bytes, bytes + size), opts, warnings);
+    if (!voice.empty()) score.voice.name = voice;
+    std::string out = nvs::scoreToJson(score);
+    if (!warnings.empty()) {
+      std::string w = "  \"importWarnings\": [";
+      for (size_t i = 0; i < warnings.size(); ++i) {
+        std::string esc;
+        for (char c : warnings[i]) {
+          if (c == '"' || c == '\\') esc += '\\';
+          esc += c;
+        }
+        w += (i ? ", \"" : "\"") + esc + "\"";
+      }
+      w += "],\n";
+      out.insert(out.find('\n') + 1, w);
+    }
+    return dupString(out);
+  } catch (const std::exception& ex) {
+    e->error = ex.what();
+    return nullptr;
+  }
+}
+
 char* nvs_phonemize(nvs_engine* e, const char* text) {
   std::istringstream in(text ? text : "");
   std::string word, out;
@@ -116,6 +157,25 @@ char* nvs_voice_names(void) {
   for (const auto& n : nvs::voicePresetNames()) s += (s.empty() ? "" : ",") + n;
   return dupString(s);
 }
+
+struct nvs_stream {
+  nvs::Stream stream;
+};
+
+nvs_stream* nvs_stream_create(nvs_engine* e, const char* score_json) {
+  nvs::Score score;
+  nvs::Lexicon lex;
+  if (!prepare(e, score_json, score, lex)) return nullptr;
+  nvs::Plan plan = nvs::planScore(score, lex);
+  return new nvs_stream{nvs::Stream(std::move(plan), score.voice, e->sampleRate)};
+}
+
+void nvs_stream_destroy(nvs_stream* s) { delete s; }
+size_t nvs_stream_length(const nvs_stream* s) { return s->stream.length(); }
+size_t nvs_stream_position(const nvs_stream* s) { return s->stream.position(); }
+double nvs_stream_lead(const nvs_stream* s) { return s->stream.plan().lead; }
+void nvs_stream_seek(nvs_stream* s, size_t sample) { s->stream.seek(sample); }
+size_t nvs_stream_process(nvs_stream* s, float* out, size_t frames) { return s->stream.process(out, frames); }
 
 const char* nvs_last_error(nvs_engine* e) { return e->error.c_str(); }
 

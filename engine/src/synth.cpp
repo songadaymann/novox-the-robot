@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 
 namespace nvs {
 
@@ -137,9 +138,11 @@ struct Biquad {
 
 class VoiceRenderer {
  public:
-  VoiceRenderer(const Plan& plan, const Voice& v, double sr, uint32_t seed, float detuneCents, double delay)
+  VoiceRenderer(const Plan& plan, const Voice& v, double sr, uint32_t seed, float detuneCents, double delay,
+                size_t startSample = 0)
       : plan_(plan), v_(v), sr_(sr), rng_(seed), pitchWander_(seed * 7 + 1),
-        f1Wander_(seed * 13 + 2), f2Wander_(seed * 17 + 3), detune_(detuneCents), delay_(delay) {
+        f1Wander_(seed * 13 + 2), f2Wander_(seed * 17 + 3), detune_(detuneCents), delay_(delay),
+        pos_(startSample) {
     singer_.peaking(v.singerFormantHz * std::sqrt(v.formantScale), 1.4, v.singerFormantDb, sr);
     for (int i = 0; i < v.eqBands; ++i) eq_[i].peaking(v.eq[i][0], std::max(0.2f, v.eq[i][2]), v.eq[i][1], sr);
     // Brightness -> one-pole tilt coefficient on the glottal source.
@@ -155,16 +158,20 @@ class VoiceRenderer {
     fricLp_.lowpass(std::min(9000.0, sr * 0.45), 0.707, sr);
   }
 
-  void render(std::vector<float>& out) {
-    const size_t total = out.size();
+  // Adds the next n samples into out. Control parameters update on absolute
+  // kBlock boundaries, so any chunking produces identical audio.
+  void process(float* out, size_t n) {
     const double dt = kBlock / sr_;
-    for (size_t block = 0; block < total; block += kBlock) {
-      double t = (static_cast<double>(block) + kBlock / 2.0) / sr_ - delay_;
-      Params p = paramsAt(t);
-      double f0 = f0At(t, dt);
-      configure(p, f0, dt);
-      size_t end = std::min(total, block + kBlock);
-      for (size_t i = block; i < end; ++i) out[i] += static_cast<float>(sample(p, f0));
+    for (size_t i = 0; i < n; ++i, ++pos_) {
+      if (!configured_ || pos_ % kBlock == 0) {
+        size_t block = pos_ - pos_ % kBlock;
+        double t = (static_cast<double>(block) + kBlock / 2.0) / sr_ - delay_;
+        p_ = paramsAt(t);
+        f0_ = f0At(t, dt);
+        configure(p_, f0_, dt);
+        configured_ = true;
+      }
+      out[i] += static_cast<float>(sample(p_, f0_));
     }
   }
 
@@ -176,6 +183,10 @@ class VoiceRenderer {
   Wander pitchWander_, f1Wander_, f2Wander_;
   float detune_;
   double delay_;
+  size_t pos_ = 0;
+  bool configured_ = false;
+  Params p_{};
+  double f0_ = 0;
 
   size_t seg_ = 0;
   size_t note_ = 0;
@@ -385,21 +396,77 @@ class VoiceRenderer {
 
 }  // namespace
 
-std::vector<float> renderPlan(const Plan& plan, const Voice& voice, const RenderOptions& opts) {
-  const int members = std::max(1, voice.choirSize);
-  double extra = members > 1 ? voice.choirSpread : 0.0;
-  size_t total = static_cast<size_t>((plan.length + extra) * opts.sampleRate);
-  std::vector<float> out(total, 0.0f);
+// Output level before any normalization: typical voices peak around -6 dBFS.
+constexpr float kOutputGain = 0.3f;
 
-  Rng memberRng(opts.seed * 7919u + 17u);
-  for (int m = 0; m < members; ++m) {
-    float detune = m == 0 ? 0.0f : voice.choirDetune * memberRng.bipolar();
-    double delay = m == 0 ? 0.0 : voice.choirSpread * memberRng.uniform();
-    VoiceRenderer r(plan, voice, opts.sampleRate, opts.seed + static_cast<uint32_t>(m) * 101u, detune, delay);
-    r.render(out);
+struct Stream::Impl {
+  Plan plan;
+  Voice voice;
+  double sr;
+  uint32_t seed;
+  size_t length = 0;
+  size_t pos = 0;
+  float gain = 1.0f;
+  std::vector<std::unique_ptr<VoiceRenderer>> members;
+
+  void build(size_t start) {
+    members.clear();
+    const int count = std::max(1, voice.choirSize);
+    Rng memberRng(seed * 7919u + 17u);
+    for (int m = 0; m < count; ++m) {
+      float detune = m == 0 ? 0.0f : voice.choirDetune * memberRng.bipolar();
+      double delay = m == 0 ? 0.0 : voice.choirSpread * memberRng.uniform();
+      members.push_back(std::make_unique<VoiceRenderer>(plan, voice, sr, seed + static_cast<uint32_t>(m) * 101u,
+                                                        detune, delay, start));
+    }
+    gain = kOutputGain / std::sqrt(static_cast<float>(count));
+    pos = start;
   }
-  float norm = 1.0f / std::sqrt(static_cast<float>(members));
-  for (auto& s : out) s *= norm;
+};
+
+Stream::Stream(Plan plan, Voice voice, double sampleRate, uint32_t seed) : impl_(std::make_unique<Impl>()) {
+  impl_->plan = std::move(plan);
+  impl_->voice = std::move(voice);
+  impl_->sr = sampleRate;
+  impl_->seed = seed;
+  double extra = impl_->voice.choirSize > 1 ? impl_->voice.choirSpread : 0.0;
+  impl_->length = static_cast<size_t>((impl_->plan.length + extra) * sampleRate);
+  impl_->build(0);
+}
+
+Stream::~Stream() = default;
+Stream::Stream(Stream&&) noexcept = default;
+Stream& Stream::operator=(Stream&&) noexcept = default;
+
+size_t Stream::length() const { return impl_->length; }
+size_t Stream::position() const { return impl_->pos; }
+double Stream::sampleRate() const { return impl_->sr; }
+const Plan& Stream::plan() const { return impl_->plan; }
+
+void Stream::seek(size_t sample) {
+  // Filters restart from silence; fine for transport jumps.
+  impl_->build(std::min(sample, impl_->length));
+}
+
+size_t Stream::process(float* out, size_t frames) {
+  std::fill(out, out + frames, 0.0f);
+  size_t live = impl_->pos < impl_->length ? std::min(frames, impl_->length - impl_->pos) : 0;
+  if (live > 0) {
+    for (auto& m : impl_->members) m->process(out, live);
+    for (size_t i = 0; i < live; ++i) {
+      // Gentle soft clip so a hot voice can't hard-clip a DAW track.
+      float x = out[i] * impl_->gain;
+      out[i] = std::fabs(x) < 0.8f ? x : std::copysign(0.8f + 0.2f * std::tanh((std::fabs(x) - 0.8f) / 0.2f), x);
+    }
+  }
+  impl_->pos += frames;
+  return live;
+}
+
+std::vector<float> renderPlan(const Plan& plan, const Voice& voice, const RenderOptions& opts) {
+  Stream stream(plan, voice, opts.sampleRate, opts.seed);
+  std::vector<float> out(stream.length(), 0.0f);
+  stream.process(out.data(), out.size());
 
   if (opts.normalize) {
     float peak = 0;

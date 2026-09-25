@@ -39,7 +39,7 @@ bool writeWav(const std::string& path, const float* data, size_t count, int rate
 }
 
 std::string readFile(const std::string& path) {
-  std::ifstream f(path);
+  std::ifstream f(path, std::ios::binary);
   if (!f) return "";
   std::stringstream ss;
   ss << f.rdbuf();
@@ -72,12 +72,14 @@ std::string findDictionary(const char* argv0, const std::string& flag) {
 
 void usage() {
   std::cerr << "usage:\n"
-               "  nvs render <score.json> -o <out.wav> [--voice NAME] [--rate HZ]\n"
-               "  nvs plan <score.json>\n"
+               "  nvs render <score.json|song.mid|song.musicxml> -o <out.wav> [--voice NAME] [--rate HZ]\n"
+               "             [--lyrics \"hel-lo world\"] [--track N]\n"
+               "  nvs import <song.mid|song.musicxml> [-o score.json] [--lyrics ...] [--track N]\n"
+               "  nvs plan <score.json|song.mid|song.musicxml>\n"
                "  nvs say \"words to sing\" -o <out.wav> [--pitch C4] [--beats 1] [--tempo 100] [--voice NAME]\n"
                "  nvs phonemes \"words\"\n"
                "  nvs voices\n"
-               "options: --dict PATH (default data/cmudict.dict or $NVS_DICT)\n";
+               "options: --dict PATH  extra cmudict-format dictionary (also $NVS_DICT)\n";
 }
 
 }  // namespace
@@ -88,12 +90,18 @@ int main(int argc, char** argv) {
     return 1;
   }
   std::string cmd = argv[1];
-  std::string input, out = "out.wav", voice, dict, pitch = "C4";
+  std::string input, out = "out.wav", voice, dict, pitch = "C4", lyrics;
   double rate = 48000, beats = 1, tempo = 100;
+  int track = -1;
+  bool outGiven = false;
   for (int i = 2; i < argc; ++i) {
     std::string a = argv[i];
     auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : ""; };
-    if (a == "-o" || a == "--out") out = next();
+    if (a == "-o" || a == "--out") {
+      out = next();
+      outGiven = true;
+    } else if (a == "--lyrics") lyrics = next();
+    else if (a == "--track") track = std::atoi(next().c_str());
     else if (a == "--voice") voice = next();
     else if (a == "--dict") dict = next();
     else if (a == "--rate") rate = std::atof(next().c_str());
@@ -111,8 +119,11 @@ int main(int argc, char** argv) {
   }
 
   nvs_engine* e = nvs_create(rate);
-  if (nvs_load_dictionary(e, findDictionary(argv[0], dict).c_str()) < 0) {
-    std::cerr << "warning: " << nvs_last_error(e) << " (spelling rules only)\n";
+  // The dictionary is built in; --dict / $NVS_DICT add or override entries.
+  if (!dict.empty() || std::getenv("NVS_DICT")) {
+    if (nvs_load_dictionary(e, findDictionary(argv[0], dict).c_str()) < 0) {
+      std::cerr << "warning: " << nvs_last_error(e) << "\n";
+    }
   }
 
   int status = 0;
@@ -120,7 +131,7 @@ int main(int argc, char** argv) {
     char* p = nvs_phonemize(e, input.c_str());
     std::cout << p << "\n";
     nvs_free(p);
-  } else if (cmd == "render" || cmd == "plan" || cmd == "say") {
+  } else if (cmd == "render" || cmd == "plan" || cmd == "say" || cmd == "import") {
     std::string score;
     if (cmd == "say") {
       // One note per syllable on a single pitch: a quick pronunciation check.
@@ -147,6 +158,24 @@ int main(int argc, char** argv) {
         std::cerr << "could not read " << input << "\n";
         return 1;
       }
+      // MIDI and MusicXML go through the importer; JSON scores are used as-is.
+      size_t first = score.find_first_not_of(" \t\r\n");
+      bool isJson = first != std::string::npos && score[first] == '{';
+      if (!isJson || cmd == "import") {
+        std::string opts = "{\"track\": " + std::to_string(track) + ", \"lyrics\": \"" + jsonEscape(lyrics) + "\"}";
+        char* imported = nvs_import(e, score.data(), score.size(), opts.c_str());
+        if (!imported) {
+          std::cerr << "error: " << nvs_last_error(e) << "\n";
+          return 1;
+        }
+        score = imported;
+        nvs_free(imported);
+        size_t w = score.find("\"importWarnings\"");
+        if (w != std::string::npos) std::cerr << "note: " << score.substr(w, score.find('\n', w) - w) << "\n";
+      } else if (!lyrics.empty()) {
+        size_t brace = score.rfind('}');
+        if (brace != std::string::npos) score.insert(brace, ", \"lyrics\": \"" + jsonEscape(lyrics) + "\"");
+      }
       if (!voice.empty()) {
         // Command-line voice wins: splice it in as the last key.
         size_t brace = score.rfind('}');
@@ -154,7 +183,14 @@ int main(int argc, char** argv) {
       }
     }
 
-    if (cmd == "plan") {
+    if (cmd == "import") {
+      if (outGiven) {
+        std::ofstream(out) << score;
+        std::cerr << "wrote " << out << "\n";
+      } else {
+        std::cout << score;
+      }
+    } else if (cmd == "plan") {
       char* plan = nvs_plan(e, score.c_str());
       if (!plan) {
         std::cerr << "error: " << nvs_last_error(e) << "\n";

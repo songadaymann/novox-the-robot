@@ -20,6 +20,13 @@ class Lexicon {
   // Loads a cmudict-format file ("word PH1 PH2 ..."). Returns entries loaded, or -1.
   int loadCmudict(const std::string& path);
 
+  // Parses cmudict-format text already in memory. Returns entries loaded.
+  int loadCmudictText(const std::string& text);
+
+  // Loads the dictionary compiled into the engine, if the build embedded one.
+  // Returns entries loaded, or -1 if this build has no embedded dictionary.
+  int loadEmbedded();
+
   // Adds or replaces a user pronunciation, e.g. addWord("hugh", "HH Y UW1").
   bool addWord(const std::string& word, const std::string& arpabet);
 

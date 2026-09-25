@@ -53,10 +53,23 @@ class Singer:
         lib.nvs_last_error.restype = ctypes.c_char_p
         lib.nvs_last_error.argtypes = [ctypes.c_void_p]
         lib.nvs_free.argtypes = [ctypes.c_void_p]
+        lib.nvs_import.restype = ctypes.c_void_p
+        lib.nvs_import.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_char_p]
+        lib.nvs_stream_create.restype = ctypes.c_void_p
+        lib.nvs_stream_create.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+        lib.nvs_stream_destroy.argtypes = [ctypes.c_void_p]
+        for fn in ("nvs_stream_length", "nvs_stream_position"):
+            getattr(lib, fn).restype = ctypes.c_size_t
+            getattr(lib, fn).argtypes = [ctypes.c_void_p]
+        lib.nvs_stream_lead.restype = ctypes.c_double
+        lib.nvs_stream_lead.argtypes = [ctypes.c_void_p]
+        lib.nvs_stream_seek.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+        lib.nvs_stream_process.restype = ctypes.c_size_t
+        lib.nvs_stream_process.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_float), ctypes.c_size_t]
         self._lib = lib
         self._engine = lib.nvs_create(sample_rate)
-        dict_path = Path(dictionary) if dictionary else ROOT / "data" / "cmudict.dict"
-        if lib.nvs_load_dictionary(self._engine, str(dict_path).encode()) < 0:
+        # The CMU dictionary is compiled in; `dictionary` adds a cmudict-format file on top.
+        if dictionary and lib.nvs_load_dictionary(self._engine, str(dictionary).encode()) < 0:
             raise NvsError(self._error())
 
     def __del__(self):
@@ -105,6 +118,19 @@ class Singer:
         if self._lib.nvs_add_word(self._engine, word.encode(), arpabet.encode()):
             raise NvsError(self._error())
 
+    def import_file(self, path, lyrics: str = "", track: int = -1, voice: str = "") -> dict:
+        """Read a MIDI or MusicXML file into a score dict (render it with render())."""
+        data = Path(path).read_bytes()
+        opts = json.dumps({"lyrics": lyrics, "track": track, **({"voice": voice} if voice else {})})
+        return json.loads(self._take_string(self._lib.nvs_import(self._engine, data, len(data), opts.encode())))
+
+    def stream(self, score) -> "Stream":
+        """Incremental renderer (what a plugin uses): process(n) returns the next n samples."""
+        ptr = self._lib.nvs_stream_create(self._engine, self._score_text(score))
+        if not ptr:
+            raise NvsError(self._error())
+        return Stream(self, ptr)
+
     def voices(self) -> list[str]:
         return self._take_string(self._lib.nvs_voice_names()).split(",")
 
@@ -115,3 +141,40 @@ class Singer:
             f.write(b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVE")
             f.write(b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * 2, 2, 16))
             f.write(b"data" + struct.pack("<I", len(data)) + data)
+
+
+class Stream:
+    """Real-time style rendering of one score. Create with Singer.stream(score)."""
+
+    def __init__(self, singer: Singer, ptr):
+        self._singer, self._lib, self._ptr = singer, singer._lib, ptr
+
+    def __del__(self):
+        if getattr(self, "_ptr", None):
+            self._lib.nvs_stream_destroy(self._ptr)
+            self._ptr = None
+
+    @property
+    def length(self) -> int:
+        return self._lib.nvs_stream_length(self._ptr)
+
+    @property
+    def position(self) -> int:
+        return self._lib.nvs_stream_position(self._ptr)
+
+    @property
+    def lead(self) -> float:
+        """Seconds of pre-roll before score time 0."""
+        return self._lib.nvs_stream_lead(self._ptr)
+
+    def seek(self, sample: int) -> None:
+        self._lib.nvs_stream_seek(self._ptr, sample)
+
+    def process(self, frames: int):
+        buf = (ctypes.c_float * frames)()
+        self._lib.nvs_stream_process(self._ptr, buf, frames)
+        try:
+            import numpy as np
+            return np.frombuffer(buf, dtype=np.float32).copy()
+        except ImportError:
+            return list(buf)

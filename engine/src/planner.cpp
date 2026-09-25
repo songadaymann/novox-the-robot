@@ -269,7 +269,8 @@ class Emitter {
     Segment s;
     s.kind = kind;
     s.label = label;
-    s.start = out_.empty() ? start : std::max(start, out_.back().end);
+    // Butt segments together exactly (no float slivers between them).
+    s.start = out_.empty() ? start : (start <= out_.back().end + 1e-6 ? out_.back().end : start);
     s.end = end;
     s.p = p;
     s.takeNextFormants = takeNext;
@@ -501,6 +502,14 @@ Plan planScore(const Score& score, const Lexicon& lex) {
 
   std::vector<Segment>& segs = plan.segments;
   Emitter emit(segs);
+  // Silence from time 0 up to the first consonant.
+  if (onsetStart[0] > 1e-6) {
+    Segment sil;
+    sil.kind = SegKind::Silence;
+    sil.label = "_";
+    sil.end = onsetStart[0];
+    segs.push_back(sil);
+  }
   for (size_t i = 0; i < n; ++i) {
     const Syl& s = syls[i];
     // Onset consonants, ending exactly on the beat.

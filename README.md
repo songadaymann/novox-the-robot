@@ -23,7 +23,19 @@ build/nvs say "hello my name is hugh" -o out/hello.wav --pitch D3 --voice robot
 build/nvs render scores/demo.json -o out/demo.wav --voice female
 build/nvs plan scores/demo.json      # the syllable + phoneme timeline, as JSON
 build/nvs voices
+
+# MIDI and MusicXML work directly (lyrics from the file, or supplied):
+build/nvs render melody.mid --lyrics "hap-py birth-day to you" -o out/song.wav
+build/nvs render song.musicxml --voice female -o out/song.wav
+build/nvs import melody.mid --lyrics "..." -o scores/melody.json   # editable JSON score
+
+ctest --test-dir build   # engine tests
 ```
+
+The CMU dictionary is compiled into the engine, so the binary and library need no data files
+(`--dict` adds extra entries). MIDI import reads lyric meta events and tempo changes; MusicXML
+import handles ties, melisma extenders, hyphenated syllables and multiple voices (it sings the
+first voice of the first part; choose another part with `--track`).
 
 Scores are JSON (`scores/demo.json`, format documented in `engine/src/score.hpp`):
 
@@ -51,7 +63,18 @@ import nvs
 singer = nvs.Singer()
 audio = singer.render({"tempo": 100, "lyrics": "good mor-ning", "notes": ["C4 1", "E4 1", "G4 2"]})
 singer.save_wav("out/morning.wav", audio)
+
+score = singer.import_file("melody.mid", lyrics="hel-lo world")   # MIDI / MusicXML -> score dict
+stream = singer.stream(score)                                    # real-time style rendering
+chunk = stream.process(512)                                      # next 512 samples
 ```
+
+## Real-time streaming (for plugins)
+
+`nvs_stream_create` / `nvs_stream_process` render a score incrementally: any chunk size, any
+start position (`nvs_stream_seek`), no allocation in `process`, and output identical to an offline
+render. Output is at a fixed level (peaks around −5 dBFS) with a soft clip. Onset consonants start
+before the beat, so audio begins `nvs_stream_lead()` seconds before score time 0.
 
 ## Layout
 

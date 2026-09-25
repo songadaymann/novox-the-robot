@@ -110,7 +110,10 @@ def convert(score: dict, singer: nvs.Singer) -> str:
                        ("<tied type=\"start\"/>" if tie_start else "") + "</notations>"
             if first and syl and not is_rest and syl["text"]:
                 text = syl["text"].strip(",.;:!?\"")
-                xml += f"<lyric number=\"1\"><syllabic>{syl_kind(syl, plan)}</syllabic><text>{escape(text)}</text></lyric>"
+                # A syllable held over following notes gets an extender line.
+                held = round(syl["end"] / beat_sec, 3) > round(start + dur, 3) + 1e-3
+                ext = "<extend/>" if held else ""
+                xml += f"<lyric number=\"1\"><syllabic>{syl_kind(syl, plan)}</syllabic><text>{escape(text)}</text>{ext}</lyric>"
             xml += "</note>"
             measure.append(xml)
             remaining -= chunk

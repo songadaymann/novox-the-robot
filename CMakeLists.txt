@@ -9,6 +9,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 set(NVS_SOURCES
+  engine/src/import.cpp
   engine/src/lexicon.cpp
   engine/src/phonemes.cpp
   engine/src/planner.cpp
@@ -18,16 +19,49 @@ set(NVS_SOURCES
   engine/src/nvs.cpp
 )
 
-# Static library: linked into the CLI and (later) the plugin.
-add_library(nvs_static STATIC ${NVS_SOURCES})
-target_include_directories(nvs_static PUBLIC engine/include PRIVATE engine/src)
-set_target_properties(nvs_static PROPERTIES OUTPUT_NAME nvs POSITION_INDEPENDENT_CODE ON)
-target_compile_options(nvs_static PRIVATE -Wall -Wextra)
+# Embed the CMU dictionary so the engine needs no external files.
+option(NVS_EMBED_DICT "Compile the CMU pronouncing dictionary into the engine" ON)
+if(NVS_EMBED_DICT)
+  find_package(Python3 COMPONENTS Interpreter)
+  if(Python3_FOUND)
+    set(NVS_DICT_CPP ${CMAKE_BINARY_DIR}/generated/cmudict_embedded.cpp)
+    add_custom_command(
+      OUTPUT ${NVS_DICT_CPP}
+      COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/generated
+      COMMAND Python3::Interpreter ${CMAKE_SOURCE_DIR}/tools/embed_dict.py
+              ${CMAKE_SOURCE_DIR}/data/cmudict.dict ${NVS_DICT_CPP}
+      DEPENDS ${CMAKE_SOURCE_DIR}/data/cmudict.dict ${CMAKE_SOURCE_DIR}/tools/embed_dict.py
+      COMMENT "Embedding CMU dictionary")
+    list(APPEND NVS_SOURCES ${NVS_DICT_CPP})
+    add_compile_definitions(NVS_EMBEDDED_DICT=1)
+  else()
+    message(WARNING "Python 3 not found: building without the embedded dictionary")
+  endif()
+endif()
+
+# Compile the engine once; static and shared libraries both use these objects.
+add_library(nvs_objects OBJECT ${NVS_SOURCES})
+target_include_directories(nvs_objects PUBLIC engine/include PRIVATE engine/src)
+set_target_properties(nvs_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_compile_options(nvs_objects PRIVATE -Wall -Wextra)
+
+# Static library: linked into the CLI, tests and (later) the plugin.
+add_library(nvs_static STATIC $<TARGET_OBJECTS:nvs_objects>)
+target_include_directories(nvs_static PUBLIC engine/include)
+set_target_properties(nvs_static PROPERTIES OUTPUT_NAME nvs)
 
 # Shared library: loaded by the Python bindings.
-add_library(nvs_shared SHARED ${NVS_SOURCES})
-target_include_directories(nvs_shared PUBLIC engine/include PRIVATE engine/src)
+add_library(nvs_shared SHARED $<TARGET_OBJECTS:nvs_objects>)
+target_include_directories(nvs_shared PUBLIC engine/include)
 set_target_properties(nvs_shared PROPERTIES OUTPUT_NAME nvs)
 
 add_executable(nvs engine/cli/main.cpp)
 target_link_libraries(nvs PRIVATE nvs_static)
+
+# Tests: `ctest --test-dir build` (or run build/nvs_tests).
+enable_testing()
+add_executable(nvs_tests tests/engine_tests.cpp)
+target_link_libraries(nvs_tests PRIVATE nvs_static)
+target_include_directories(nvs_tests PRIVATE engine/src)
+target_compile_definitions(nvs_tests PRIVATE NVS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME engine COMMAND nvs_tests)

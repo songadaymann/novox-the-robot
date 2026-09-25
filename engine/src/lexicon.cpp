@@ -49,6 +49,13 @@ bool Lexicon::parseArpabet(const std::string& text, Pronunciation& out) {
 int Lexicon::loadCmudict(const std::string& path) {
   std::ifstream in(path);
   if (!in) return -1;
+  std::stringstream ss;
+  ss << in.rdbuf();
+  return loadCmudictText(ss.str());
+}
+
+int Lexicon::loadCmudictText(const std::string& text) {
+  std::istringstream in(text);
   std::string line;
   int count = 0;
   while (std::getline(in, line)) {
@@ -68,6 +75,18 @@ int Lexicon::loadCmudict(const std::string& path) {
   }
   return count;
 }
+
+#ifdef NVS_EMBEDDED_DICT
+extern const char* const kCmudictChunks[];
+extern const size_t kCmudictChunkCount;
+int Lexicon::loadEmbedded() {
+  std::string text;
+  for (size_t i = 0; i < kCmudictChunkCount; ++i) text += kCmudictChunks[i];
+  return loadCmudictText(text);
+}
+#else
+int Lexicon::loadEmbedded() { return -1; }
+#endif
 
 bool Lexicon::addWord(const std::string& word, const std::string& arpabet) {
   Pronunciation p;

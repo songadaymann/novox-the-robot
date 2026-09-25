@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>New Virtual Singer · UI Mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#0c0d0f;color:#dde1e6;font:14px/1.5 Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1120px;margin:0 auto;padding:48px 24px 64px}
+  h1{margin:0;font-size:30px;font-weight:800;letter-spacing:-.02em}
+  .sub{color:#8a929c;margin:6px 0 30px;max-width:720px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(500px,1fr));gap:22px}
+  a.card{display:block;text-decoration:none;color:inherit;background:#15171a;border:1px solid #23272d;border-radius:12px;overflow:hidden;transition:border-color .15s,transform .15s}
+  a.card:hover{border-color:#4a525c;transform:translateY(-2px)}
+  .thumb{height:306px;overflow:hidden;position:relative;background:#0c0d0f;border-bottom:1px solid #23272d}
+  .thumb iframe{position:absolute;left:50%;top:50%;width:1040px;height:680px;border:0;transform:translate(-50%,-50%) scale(.45);pointer-events:none}
+  .meta{padding:14px 16px 16px}
+  .meta h2{margin:0 0 4px;font-size:16px;font-weight:700;display:flex;gap:10px;align-items:center}
+  .meta h2 span{font-size:11px;font-weight:700;background:#262a30;color:#c9ced4;border-radius:5px;padding:2px 7px}
+  .meta p{margin:0;color:#8a929c;font-size:13px}
+  .foot{margin-top:30px;color:#5b626b;font-size:12.5px}
+  @media (max-width:560px){.grid{grid-template-columns:1fr}.thumb{height:200px}.thumb iframe{transform:translate(-50%,-50%) scale(.3)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>New Virtual Singer · UI directions</h1>
+  <p class="sub">Four mockups of a 1000×640 plugin window. Each one shows all three ways to get a song in (MIDI + lyrics, audio in, voices), but leans on a different one. They're clickable, but there's no audio.</p>
+  <div class="grid">
+    <a class="card" href="a-piano-roll.html"><div class="thumb"><iframe src="a-piano-roll.html" loading="lazy" tabindex="-1"></iframe></div>
+      <div class="meta"><h2><span>A</span>Piano roll + lyric lane</h2><p>A DAW-style piano roll with each syllable written inside its note. Type in one lyric line and the syllables fill the notes in order, with a phoneme strip underneath.</p></div></a>
+    <a class="card" href="b-lyric-sheet.html"><div class="thumb"><iframe src="b-lyric-sheet.html" loading="lazy" tabindex="-1"></iframe></div>
+      <div class="meta"><h2><span>B</span>Lyrics-first sheet</h2><p>Write it like a lyric sheet. Small pitch marks float above each syllable, and when you capture MIDI, what you play fills the line one note at a time.</p></div></a>
+    <a class="card" href="c-audio-drop.html"><div class="thumb"><iframe src="c-audio-drop.html" loading="lazy" tabindex="-1"></iframe></div>
+      <div class="meta"><h2><span>C</span>Audio-drop workflow</h2><p>Drop a sung take, analyze it, check the words and notes it heard, then accept them as notes. Words are colored by how sure the detection is, and you can A/B your take against the virtual singer.</p></div></a>
+    <a class="card" href="d-voice-designer.html"><div class="thumb"><iframe src="d-voice-designer.html" loading="lazy" tabindex="-1"></iframe></div>
+      <div class="meta"><h2><span>D</span>Voice designer (Aqua homage)</h2><p>A playful early-2000s Mac look for picking and shaping voices: a gallery of face avatars, gel knobs, a vowel/formant chart, a choir-size crowd and a per-phoneme accent sheet.</p></div></a>
+  </div>
+  <p class="foot">Example lyric (original): “the ket-tle sings at sev-en, and I hum a-long”. The data is made up and the mockups have no real audio.</p>
+</div>
+</body>
+</html>

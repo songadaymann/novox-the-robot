@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NVS · B · Lyric Sheet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --page:#101010; --paper:#f5f0e6; --paper2:#ede6d8; --rule:#ddd3c1; --ink:#23201b; --ink2:#5d564b; --ink3:#9a917f;
+    --red:#d2462a; --blue:#2f5fb3; --blueSoft:#dfe7f5; --green:#3f8a5a; --shadow:rgba(60,40,10,.12);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--page);font:12px/1.4 "IBM Plex Sans",system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+  body{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;min-height:100vh}
+  .caption{color:#6b6b6b;font-size:11px}
+  .caption a{color:#8fb8ff;text-decoration:none}
+  .mono{font-family:"IBM Plex Mono",monospace}
+  .win{width:1000px;height:640px;background:var(--paper);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 30px 80px rgba(0,0,0,.6),0 0 0 1px #000}
+
+  .top{height:50px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;background:#2a2621;color:#f1ebdf}
+  .brand{font:600 17px Newsreader,serif;letter-spacing:.005em;margin-right:6px;white-space:nowrap}
+  .brand i{font-style:italic;color:#e9a07f;font-weight:500}
+  .ib{all:unset;cursor:pointer;display:flex;align-items:center;gap:7px;padding:6px 11px;border-radius:6px;border:1px solid #4a4339;color:#e9e2d3;white-space:nowrap;font-weight:500}
+  .ib:hover{background:#39332b}
+  .ib .r{width:9px;height:9px;border-radius:50%;background:var(--red)}
+  .ib.rec{background:#5a2319;border-color:#a2402a;color:#fff}
+  .ib.rec .r{animation:blink .8s infinite}
+  @keyframes blink{50%{opacity:.25}}
+  .sp{flex:1}
+  .vpill{display:flex;align-items:center;gap:8px;padding:3px 11px 3px 3px;border-radius:20px;background:#3a342c;cursor:pointer;white-space:nowrap}
+  .vpill:hover{background:#463f35}
+  .face{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:#f0c9a4}
+  .vpill b{font-weight:600}
+  .vpill small{color:#b9ae9a}
+  .tp{display:flex;gap:4px}
+  .tp button{all:unset;cursor:pointer;width:30px;height:28px;border-radius:6px;display:grid;place-items:center;background:#3a342c;color:#f1ebdf}
+  .tp button:hover{background:#4a4238}
+  .tp button.on{background:var(--green)}
+
+  .body{flex:1;display:flex;min-height:0}
+  .rail{width:150px;flex:none;background:var(--paper2);border-right:1px solid var(--rule);padding:14px 10px;display:flex;flex-direction:column;gap:2px}
+  .rh{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3);font-weight:600;padding:0 8px 6px}
+  .sec{padding:7px 8px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:8px;color:var(--ink2)}
+  .sec:hover{background:#e3dac9}
+  .sec.on{background:#fff;color:var(--ink);box-shadow:0 1px 2px var(--shadow)}
+  .sec b{font-weight:600;flex:1}
+  .sec .m{font:500 10px "IBM Plex Mono",monospace;color:var(--ink3)}
+  .pip{width:7px;height:7px;border-radius:50%;background:var(--green)}
+  .pip.half{background:linear-gradient(90deg,var(--green) 50%,#cbbfa8 50%)}
+  .pip.none{background:#cbbfa8}
+  .add{margin-top:6px;color:var(--ink3);padding:6px 8px;cursor:pointer}
+  .add:hover{color:var(--ink)}
+  .legend{margin-top:auto;font-size:10.5px;color:var(--ink3);line-height:1.7;padding:0 6px}
+  .legend kbd{font:500 10px "IBM Plex Mono",monospace;border:1px solid #cbbfa8;border-bottom-width:2px;border-radius:3px;padding:0 4px;background:#f8f4ec;color:var(--ink2)}
+
+  .sheet{flex:1;overflow:auto;padding:22px 16px 20px 16px;position:relative;background:
+      linear-gradient(90deg,transparent 52px,rgba(210,70,42,.25) 52px,rgba(210,70,42,.25) 53px,transparent 53px),var(--paper)}
+  .sheet h2{margin:0 0 4px 46px;font:600 22px Newsreader,serif;display:flex;align-items:baseline;gap:12px}
+  .sheet h2 small{font:500 11px "IBM Plex Sans";color:var(--ink3);letter-spacing:.04em}
+  .line{position:relative;display:flex;align-items:flex-end;padding:6px 8px 8px 46px;border-radius:8px;cursor:text;min-height:92px}
+  .line:hover{background:rgba(255,255,255,.45)}
+  .line.on{background:#fff;box-shadow:0 1px 3px var(--shadow),0 0 0 1px #e6dccb}
+  .ln{position:absolute;left:10px;bottom:12px;font:500 10px "IBM Plex Mono";color:var(--ink3);width:24px;text-align:right}
+  .cols{display:flex;align-items:flex-end;position:relative}
+  .col{position:relative;display:flex;flex-direction:column;align-items:flex-start;flex:none}
+  .neu{position:relative;height:50px;width:100%}
+  .pill{position:absolute;height:9px;border-radius:5px;background:var(--ink);cursor:pointer;transition:transform .08s}
+  .pill:hover{transform:scaleY(1.35)}
+  .pill.mel{background:var(--ink2)}
+  .pill.sel{background:var(--blue);box-shadow:0 0 0 3px var(--blueSoft)}
+  .pill.q{background:transparent;border:1.5px dashed #bfb39c;height:10px}
+  .pn{position:absolute;font:500 9px "IBM Plex Mono",monospace;color:var(--ink3);transform:translateY(-13px);white-space:nowrap;pointer-events:none}
+  .pn.sel{color:var(--blue);font-weight:600}
+  .syl{font:400 20px/1.1 Newsreader,serif;padding:2px 2px;border-radius:4px;white-space:nowrap;cursor:pointer;position:relative}
+  .syl:hover{background:#f1e9da}
+  .syl.sel{background:var(--blueSoft);color:#173b7a}
+  .syl.hy::after{content:"-";color:var(--ink3);margin-left:1px}
+  .syl.ext{color:transparent;min-width:18px}
+  .syl.ext::before{content:"";position:absolute;left:0;right:4px;bottom:7px;border-bottom:1.5px solid var(--ink3)}
+  .syl.ext.sel::before{border-color:var(--blue)}
+  .contour{position:absolute;left:0;top:0;pointer-events:none;overflow:visible}
+  .edit{font:400 21px Newsreader,serif;border:none;outline:none;background:transparent;width:100%;color:var(--ink);padding:2px;border-bottom:2px solid var(--blue)}
+  .needs{position:absolute;right:10px;top:10px;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--red);background:#fbe9e3;border:1px solid #f0c2b4;padding:3px 8px;border-radius:12px;cursor:pointer}
+  .needs:hover{background:#f8dcd2}
+  .count{position:absolute;left:14px;bottom:36px;width:20px;text-align:right;font:600 11px "IBM Plex Mono";color:var(--green)}
+  .chorus{margin-top:18px;opacity:.55}
+
+  .insp{width:232px;flex:none;background:#faf7f1;border-left:1px solid var(--rule);display:flex;flex-direction:column}
+  .tabs{display:flex;border-bottom:1px solid var(--rule)}
+  .tabs button{all:unset;cursor:pointer;flex:1;text-align:center;padding:10px 0 9px;font-weight:600;color:var(--ink3);border-bottom:2px solid transparent}
+  .tabs button.on{color:var(--ink);border-color:var(--ink)}
+  .pane{display:none;padding:14px 16px;flex-direction:column;gap:12px;overflow:auto;flex:1}
+  .pane.on{display:flex}
+  .bigsyl{font:500 34px/1 Newsreader,serif}
+  .row{display:flex;align-items:center;justify-content:space-between}
+  .lab{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3);font-weight:600;margin-bottom:5px}
+  .step{display:flex;align-items:center;border:1px solid var(--rule);border-radius:7px;background:#fff;overflow:hidden}
+  .step button{all:unset;cursor:pointer;width:30px;height:30px;display:grid;place-items:center;color:var(--ink2)}
+  .step button:hover{background:#f1e9da}
+  .step span{flex:1;text-align:center;font:500 15px "IBM Plex Mono"}
+  .durs{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
+  .durs button{all:unset;cursor:pointer;text-align:center;padding:5px 0;border:1px solid var(--rule);border-radius:5px;background:#fff;font:500 11px "IBM Plex Mono";color:var(--ink2)}
+  .durs button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .phs{display:flex;gap:4px;flex-wrap:wrap}
+  .phs span{font:500 11px "IBM Plex Mono";padding:3px 6px;border-radius:4px;background:#efe7d8;color:var(--ink2)}
+  .phs span.v{background:#fbe3c6;color:#8a4a0e}
+  .acts{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .acts button{all:unset;cursor:pointer;padding:7px 8px;border:1px solid var(--rule);border-radius:6px;background:#fff;font-size:11px;color:var(--ink2);text-align:center}
+  .acts button:hover{border-color:#bfb39c;color:var(--ink)}
+  .note{font-size:11px;color:var(--ink3);line-height:1.5}
+  .vlist{display:flex;flex-direction:column;gap:4px}
+  .vi{display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:7px;cursor:pointer;border:1px solid transparent}
+  .vi:hover{background:#f1e9da}
+  .vi.on{background:#fff;border-color:var(--rule);box-shadow:0 1px 2px var(--shadow)}
+  .vi .face{width:26px;height:26px}
+  .vi b{font-weight:600;display:block}
+  .vi small{color:var(--ink3)}
+  .sl{display:grid;grid-template-columns:64px 1fr 30px;gap:8px;align-items:center;font-size:11px;color:var(--ink2)}
+  .sl output{font:500 10px "IBM Plex Mono";text-align:right}
+  input[type=range]{-webkit-appearance:none;appearance:none;height:3px;background:#d8cdb8;border-radius:2px;outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:var(--ink);border:2px solid #faf7f1}
+
+  .ribbon{height:54px;flex:none;border-top:1px solid var(--rule);background:var(--paper2);display:flex;align-items:center;gap:14px;padding:0 14px}
+  .ribbon canvas{flex:1;height:34px;border-radius:5px;background:#e6decf}
+  .rtxt{font-size:10.5px;color:var(--ink3);white-space:nowrap}
+  .rtxt b{color:var(--ink2);font-weight:600}
+
+  .modal{position:absolute;inset:0;background:rgba(35,30,25,.45);display:none;align-items:center;justify-content:center;z-index:10}
+  .modal.on{display:flex}
+  .mbox{width:470px;background:var(--paper);border-radius:12px;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+  .mbox h3{margin:0 0 6px;font:600 22px Newsreader,serif}
+  .dz{margin:14px 0;border:1.5px dashed #bfb39c;border-radius:10px;height:130px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--ink2);background:#fbf8f2}
+  .dz:hover{border-color:var(--blue);background:#f3f6fb}
+  .mb{display:flex;justify-content:flex-end;gap:8px}
+  .mb button{all:unset;cursor:pointer;padding:7px 14px;border-radius:6px;border:1px solid var(--rule);background:#fff;font-weight:500}
+  .mb button.p{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .toast{position:absolute;left:50%;bottom:70px;transform:translateX(-50%);background:#2a2621;color:#f1ebdf;padding:8px 14px;border-radius:8px;font-size:12px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:20}
+  .toast.on{opacity:1}
+</style>
+</head>
+<body>
+<div class="win" style="position:relative">
+  <div class="top">
+    <div class="brand">New Virtual Singer <i>· lyric sheet</i></div>
+    <button class="ib" id="cap" title="Play the melody on your MIDI keyboard; notes fill the selected line in order"><span class="r"></span><span id="capt">Capture MIDI</span></button>
+    <button class="ib" id="daw"><svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1" y="3" width="11" height="7" rx="1.5"/><path d="M3 6.5h2M6 5v3M8 6h3"/></svg>From DAW region</button>
+    <button class="ib" id="aud"><svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1 6.5h2l1.5-4 2 8 2-6 1.5 2h2"/></svg>Sing it in…</button>
+    <div class="sp"></div>
+    <div class="vpill" id="vpill"><div class="face" id="vface"></div><div><b id="vname">Tenor</b> <small>· solo</small></div></div>
+    <div class="tp"><button id="play" title="Play"><svg width="11" height="11" viewBox="0 0 12 12"><path d="M2 1l9 5-9 5z" fill="currentColor"/></svg></button><button title="Loop line"><svg width="13" height="12" viewBox="0 0 13 12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 6a4 4 0 014-4h4M11 6a4 4 0 01-4 4H3M8 0l2 2-2 2M5 8l-2 2 2 2"/></svg></button></div>
+  </div>
+
+  <div class="body">
+    <div class="rail">
+      <div class="rh">Song</div>
+      <div class="sec on"><span class="pip half"></span><b>Verse 1</b><span class="m">3/4</span></div>
+      <div class="sec"><span class="pip"></span><b>Chorus</b><span class="m">4/4</span></div>
+      <div class="sec"><span class="pip none"></span><b>Verse 2</b><span class="m">0/4</span></div>
+      <div class="sec"><span class="pip"></span><b>Chorus</b><span class="m">⟲</span></div>
+      <div class="add">+ Add section</div>
+      <div class="legend">
+        <div><kbd>Enter</kbd> edit line</div>
+        <div><kbd>Tab</kbd> next syllable</div>
+        <div><kbd>↑</kbd><kbd>↓</kbd> nudge pitch</div>
+        <div><kbd>-</kbd> split · <kbd>_</kbd> hold</div>
+        <div><kbd>⌘R</kbd> capture into line</div>
+      </div>
+    </div>
+
+    <div class="sheet" id="sheet">
+      <h2>Verse 1 <small>C major · 92 bpm · 4/4</small></h2>
+      <div id="lines"></div>
+      <h2 class="chorus">Chorus <small>4 lines</small></h2>
+    </div>
+
+    <div class="insp">
+      <div class="tabs"><button class="on" data-p="syl">Syllable</button><button data-p="voice">Voice</button></div>
+      <div class="pane on" id="p-syl">
+        <div class="row"><div class="bigsyl" id="bs">sev</div><div class="mono" style="color:var(--ink3);font-size:10.5px;text-align:right" id="bpos">line 1<br>syllable 6</div></div>
+        <div><div class="lab">Pitch</div><div class="step"><button id="dn">▼</button><span id="bp">E5</span><button id="up">▲</button></div></div>
+        <div><div class="lab">Length</div><div class="durs" id="durs"><button data-d=".25">𝅘𝅥𝅯</button><button data-d=".5">♪</button><button data-d=".75">♪.</button><button data-d="1">♩</button><button data-d="2">𝅗𝅥</button></div></div>
+        <div><div class="lab">Sounds like</div><div class="phs" id="phs"></div></div>
+        <div class="acts"><button id="hold">Hold onto next note</button><button>Split syllable</button><button>Merge with next</button><button>Rest before</button></div>
+        <div class="note">Tip: type the lyric first, then hit <b>Capture MIDI</b> and play — each note you play lands on the next syllable. Hold <b>shift</b> while playing to extend the previous syllable instead.</div>
+      </div>
+      <div class="pane" id="p-voice">
+        <div class="lab">Singer</div>
+        <div class="vlist" id="vlist"></div>
+        <div class="lab" style="margin-top:4px">Character</div>
+        <div class="sl">Size<input type="range" value="45"><output>−1st</output></div>
+        <div class="sl">Breath<input type="range" value="30"><output>30%</output></div>
+        <div class="sl">Vibrato<input type="range" value="55"><output>55%</output></div>
+        <div class="sl">Scoop<input type="range" value="25"><output>25%</output></div>
+        <div class="sl">Humanize<input type="range" value="40"><output>40%</output></div>
+        <div class="sl">Choir<input type="range" value="0"><output>1</output></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ribbon">
+    <span class="rtxt"><b>Whole song</b> · melody</span>
+    <canvas id="rib" width="760" height="34"></canvas>
+    <span class="rtxt mono">0:04.2 / 1:52</span>
+  </div>
+
+  <div class="modal" id="modal"><div class="mbox">
+    <h3>Sing it in</h3>
+    <div style="color:var(--ink2)">Drop a recording of yourself singing this section. We'll detect the melody and the words, and fill in any lines that match.</div>
+    <div class="dz"><svg width="34" height="34" viewBox="0 0 34 34" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="6" width="28" height="22" rx="4"/><path d="M7 17h2l2-5 3 10 2-12 3 13 2-8 2 2h3"/></svg><b>Drop audio or a DAW region</b><span style="font-size:11px;color:var(--ink3)">or <u>record from input 1</u></span></div>
+    <label style="display:flex;gap:8px;align-items:center;color:var(--ink2);font-size:11.5px"><input type="checkbox" checked> Keep the words I already typed; only take the melody</label>
+    <div class="mb" style="margin-top:14px"><button id="mc">Cancel</button><button class="p" id="mo">Analyze</button></div>
+  </div></div>
+  <div class="toast" id="toast"></div>
+</div>
+<div class="caption">Mockup B — Lyrics-first sheet · <a href="index.html">← all mockups</a></div>
+
+<script>
+const NAMES=['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
+const nn=m=>NAMES[m%12]+(Math.floor(m/12)-1);
+const P={E4:64,G4:67,A4:69,B4:71,C5:72,D5:74,E5:76};
+// [syllable, hyphenAfter, pitch, dur]  "_" = hold
+const LINES=[
+ [['the',0,'G4',.5],['ket',1,'C5',.75],['tle',0,'B4',.25],['sings',0,'A4',1],['at',0,'G4',.5],['sev',1,'E5',.75],['en,',0,'D5',.25],['and',0,'C5',.5],['I',0,'D5',.5],['hum',0,'E5',.5],['a',1,'D5',.5],['long',0,'C5',1],['_',0,'B4',.5],['_',0,'C5',1.25]],
+ [['the',0,'G4',.5],['steam',0,'A4',.5],['writes',0,'C5',1],['let',1,'C5',.5],['ters',0,'B4',.5],['on',0,'A4',.5],['the',0,'G4',.5],['win',1,'A4',.75],['dow',0,'G4',.25],['pane',0,'E4',1.5]],
+ [['I',0,'E4',.5],['read',0,'G4',.5],['them',0,'A4',.5],['back',0,'C5',1],['like',0,'D5',.5],['they',0,'E5',.5],['were',0,'D5',.5],['meant',0,'C5',.75],['for',0,'A4',.25],['me',0,'G4',.5],['_',0,'A4',.5],['_',0,'G4',1.5]],
+ [['and',0,null,0],['all',0,null,0],['the',0,null,0],['day',0,null,0],['is',0,null,0],['wait',1,null,0],['ing',0,null,0],['to',0,null,0],['be',0,null,0],['sung',0,null,0]]
+].map(l=>l.map(([s,h,p,d])=>({s,h:!!h,p:p?P[p]:null,d})));
+const DICT={the:'DH AH',ket:'K EH T',tle:'T AH L',sings:'S IH NG Z',at:'AE T',sev:'S EH V',en:'AH N',and:'AE N D',i:'AY',hum:'HH AH M',a:'AH',long:'L AO NG',steam:'S T IY M',writes:'R AY T S',let:'L EH T',ters:'T ER Z',on:'AA N',win:'W IH N',dow:'D OW',pane:'P EY N',read:'R IY D',them:'DH EH M',back:'B AE K',like:'L AY K',they:'DH EY',were:'W ER',meant:'M EH N T',for:'F AO R',me:'M IY',all:'AO L',day:'D EY',is:'IH Z',wait:'W EY T',ing:'IH NG',to:'T UW',be:'B IY',sung:'S AH NG'};
+const VOW=/^(AA|AE|AH|AO|AW|AY|EH|ER|EY|IH|IY|OW|OY|UH|UW)$/;
+const $=id=>document.getElementById(id);
+let cur={l:0,i:5}, editing=-1, capturing=false;
+
+const ctx=document.createElement('canvas').getContext('2d');ctx.font='400 20px Newsreader, serif';
+function render(){
+  const box=$('lines');box.innerHTML='';
+  LINES.forEach((line,li)=>{
+    const el=document.createElement('div');el.className='line'+(li===cur.l?' on':'');
+    el.innerHTML=`<div class="ln">${li+1}</div>`;
+    if(editing===li){
+      const inp=document.createElement('input');inp.className='edit';inp.value=toText(line);el.appendChild(inp);
+      setTimeout(()=>{inp.focus();inp.setSelectionRange(inp.value.length,inp.value.length)});
+      inp.onkeydown=e=>{if(e.key==='Enter'||e.key==='Escape'){fromText(li,inp.value);editing=-1;render();}};
+      inp.onblur=()=>{if(editing===li){fromText(li,inp.value);editing=-1;render();}};
+      box.appendChild(el);return;
+    }
+    const cols=document.createElement('div');cols.className='cols';el.appendChild(cols);
+    const ps=line.filter(n=>n.p).map(n=>n.p);const lo=Math.min(...ps,64),hi=Math.max(...ps,76);
+    const pts=[];
+    line.forEach((n,i)=>{
+      const c=document.createElement('div');c.className='col';
+      const w=Math.max(n.s==='_'?20:ctx.measureText(n.s+(n.h?'-':'')).width+6,n.d*22+2);
+      c.style.width=w+5+'px';
+      const neu=document.createElement('div');neu.className='neu';
+      const selected=li===cur.l&&i===cur.i;
+      if(n.p){const y=38-(n.p-lo)/(hi-lo||1)*30;const pw=Math.max(8,n.d*22);
+        const pill=document.createElement('div');pill.className='pill'+(n.s==='_'?' mel':'')+(selected?' sel':'');pill.style.top=y+'px';pill.style.left='2px';pill.style.width=pw+'px';
+        const lab=document.createElement('div');lab.className='pn'+(selected?' sel':'');lab.style.top=y+'px';lab.style.left='2px';lab.textContent=nn(n.p);
+        neu.appendChild(pill);if(n.s!=='_'||selected)neu.appendChild(lab);pts.push({i,y:y+4.5,x0:2,x1:2+pw});
+        pill.onclick=e=>{e.stopPropagation();pick(li,i)};
+      } else {const q=document.createElement('div');q.className='pill q';q.style.top='24px';q.style.left='2px';q.style.width=(ctx.measureText(n.s).width*.7+10)+'px';neu.appendChild(q);}
+      c.appendChild(neu);
+      const s=document.createElement('div');s.className='syl'+(n.h?' hy':'')+(n.s==='_'?' ext':'')+(selected?' sel':'');s.textContent=n.s==='_'?'_':n.s;
+      s.onclick=e=>{e.stopPropagation();pick(li,i)};
+      c.appendChild(s);cols.appendChild(c);
+    });
+    // contour
+    requestAnimationFrame(()=>{
+      const colEls=cols.querySelectorAll('.col');if(!pts.length)return;
+      const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('class','contour');svg.setAttribute('width',cols.scrollWidth);svg.setAttribute('height',50);
+      let d='';pts.forEach((p,k)=>{const ox=colEls[p.i].offsetLeft;const x0=ox+p.x0,x1=ox+p.x1;d+=(k?' L':'M')+x0+' '+p.y+' L'+x1+' '+p.y;});
+      svg.innerHTML=`<path d="${d}" fill="none" stroke="#b9ad96" stroke-width="1" stroke-dasharray="2 2"/>`;cols.prepend(svg);
+    });
+    if(line.every(n=>!n.p)){const b=document.createElement('div');b.className='needs';b.innerHTML='<span style="width:7px;height:7px;border-radius:50%;background:var(--red)"></span>No melody yet · Capture';b.onclick=e=>{e.stopPropagation();cur={l:li,i:0};startCap()};el.appendChild(b);}
+    else{const c=document.createElement('div');c.className='count';c.title=`${line.filter(n=>n.s!=='_').length} syllables on ${line.length} notes`;c.textContent='✓';el.appendChild(c);}
+    el.onclick=()=>{cur={l:li,i:Math.min(cur.l===li?cur.i:0,line.length-1)};render();};
+    el.ondblclick=()=>{editing=li;render();};
+    box.appendChild(el);
+  });
+  insp();ribbon();
+}
+function toText(line){let t='';line.forEach((n,i)=>{t+=n.s+(n.h?'-':(i<line.length-1?' ':''));});return t;}
+function fromText(li,txt){const old=LINES[li];const out=[];let k=0;
+  txt.trim().split(/\s+/).forEach(w=>{if(/^_+$/.test(w)){[...w].forEach(()=>{const o=old[k++]||{};out.push({s:'_',h:false,p:o.p??null,d:o.d||.5})});return;}
+    const parts=w.split('-').filter(Boolean);parts.forEach((p,j)=>{const o=old[k++]||{};out.push({s:p,h:j<parts.length-1,p:o.p??null,d:o.d||0})});});
+  LINES[li]=out;}
+function pick(l,i){cur={l,i};render();}
+function insp(){
+  const n=LINES[cur.l][cur.i];if(!n)return;let src=n;if(n.s==='_'){for(let j=cur.i;j>=0;j--)if(LINES[cur.l][j].s!=='_'){src=LINES[cur.l][j];break}}
+  $('bs').textContent=n.s==='_'?'('+src.s.replace(/[,.]/,'')+')':n.s.replace(/[,.]/,'');
+  $('bpos').innerHTML=`line ${cur.l+1}<br>${n.s==='_'?'held note':'syllable'} ${cur.i+1}`;
+  $('bp').textContent=n.p?nn(n.p):'—';
+  document.querySelectorAll('#durs button').forEach(b=>b.classList.toggle('on',+b.dataset.d===n.d));
+  const ph=(DICT[src.s.toLowerCase().replace(/[^a-z]/g,'')]||'AH').split(' ');
+  const list=n.s==='_'?[ph.filter(x=>VOW.test(x)).pop()]:ph;
+  $('phs').innerHTML=list.map(x=>`<span class="${VOW.test(x)?'v':''}">${x}</span>`).join('')+'<span style="background:none;color:var(--blue);cursor:pointer">edit…</span>';
+}
+function nudge(dx){const n=LINES[cur.l][cur.i];if(!n||!n.p)return;const sc=[0,2,4,5,7,9,11];let m=n.p;do{m+=dx}while(!sc.includes(m%12));n.p=m;render();}
+$('up').onclick=()=>nudge(1);$('dn').onclick=()=>nudge(-1);
+document.querySelectorAll('#durs button').forEach(b=>b.onclick=()=>{const n=LINES[cur.l][cur.i];if(n.p){n.d=+b.dataset.d;render();}});
+$('hold').onclick=()=>{const line=LINES[cur.l];line.splice(cur.i+1,0,{s:'_',h:false,p:line[cur.i].p,d:.5});render();};
+document.addEventListener('keydown',e=>{if(editing>=0||$('modal').classList.contains('on'))return;
+  if(e.key==='ArrowUp'){e.preventDefault();nudge(1)}else if(e.key==='ArrowDown'){e.preventDefault();nudge(-1)}
+  else if(e.key==='Tab'||e.key==='ArrowRight'){e.preventDefault();const L=LINES[cur.l];if(cur.i<L.length-1)cur.i++;else if(cur.l<LINES.length-1){cur.l++;cur.i=0}render();}
+  else if(e.key==='ArrowLeft'){if(cur.i>0)cur.i--;else if(cur.l>0){cur.l--;cur.i=LINES[cur.l].length-1}render();}
+  else if(e.key==='Enter'){editing=cur.l;render();}});
+
+// capture simulation: fills an empty line one note at a time
+const CAPMEL=[['C5',.5],['C5',.5],['D5',.5],['E5',1],['D5',.5],['C5',.5],['A4',.5],['G4',.5],['A4',.5],['C5',1.5]];
+let capTimer;
+function startCap(){
+  capturing=!capturing;$('cap').classList.toggle('rec',capturing);$('capt').textContent=capturing?'Listening… play the line':'Capture MIDI';
+  clearInterval(capTimer);if(!capturing)return;
+  let li=LINES.findIndex(l=>l.every(n=>!n.p));if(li<0){toast('Capturing into line '+(cur.l+1)+' (replaces melody)');li=cur.l;}
+  cur={l:li,i:0};let k=0;render();
+  capTimer=setInterval(()=>{const L=LINES[li];if(k>=L.length){clearInterval(capTimer);capturing=false;$('cap').classList.remove('rec');$('capt').textContent='Capture MIDI';toast('Line '+(li+1)+': '+L.length+' notes captured');return;}
+    const [p,d]=CAPMEL[k%CAPMEL.length];L[k].p=P[p];L[k].d=d;cur={l:li,i:k};k++;render();},380);
+}
+$('cap').onclick=startCap;
+$('daw').onclick=()=>toast('Pulled melody from Logic region “vox idea 3” — 36 notes mapped across 3 lines');
+$('aud').onclick=()=>$('modal').classList.add('on');$('mc').onclick=()=>$('modal').classList.remove('on');
+$('mo').onclick=()=>{$('modal').classList.remove('on');toast('Analyzing… melody detected for 4 lines (words kept)')};
+function toast(t){const e=$('toast');e.textContent=t;e.classList.add('on');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('on'),2400);}
+
+// right tabs + voices
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('on',x===b));document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.id==='p-'+b.dataset.p));});
+$('vpill').onclick=()=>document.querySelector('.tabs [data-p=voice]').click();
+const VOICES=[['Std Voice','classic','#f0c9a4'],['Tenor','classic','#e6b48a'],['Soprano','classic','#f3b7b0'],['Bass','classic','#c89a74'],['Kid','classic','#f7d58c'],['Gregorian','classic','#b8b0d8'],['Female Choir','choir · 8','#f3b7b0'],['Modern · Ada','modern','#9fd0c0']];
+const face=(c,w)=>`<svg width="${w}" height="${w}" viewBox="0 0 14 14"><circle cx="4.6" cy="5.4" r="1" fill="#2a2621"/><circle cx="9.4" cy="5.4" r="1" fill="#2a2621"/><ellipse cx="7" cy="9.5" rx="1.7" ry="1.4" fill="#2a2621"/></svg>`;
+$('vface').innerHTML=face('',16);$('vface').style.background='#e6b48a';
+VOICES.forEach(([n,k,c])=>{const d=document.createElement('div');d.className='vi'+(n==='Tenor'?' on':'');d.innerHTML=`<div class="face" style="background:${c}">${face(c,15)}</div><div><b>${n}</b><small>${k}</small></div>`;
+  d.onclick=()=>{document.querySelectorAll('.vi').forEach(x=>x.classList.remove('on'));d.classList.add('on');$('vname').textContent=n;$('vface').style.background=c;};$('vlist').appendChild(d);});
+
+function ribbon(){const c=$('rib'),g=c.getContext('2d');g.clearRect(0,0,c.width,c.height);
+  let x=6;const all=[];LINES.forEach((l,li)=>{l.forEach(n=>{all.push({x,li,n});x+=(n.d||.5)*16;});x+=10;});
+  for(let k=0;k<3;k++){all.slice().forEach(a=>{});} // single section shown
+  // repeat as a faux full song
+  g.fillStyle='rgba(47,95,179,.12)';const cl=all.filter(a=>a.li===cur.l);if(cl.length)g.fillRect(cl[0].x-3,0,cl[cl.length-1].x-cl[0].x+20,34);
+  const draw=(off,alpha)=>{all.forEach(a=>{if(!a.n.p)return;g.fillStyle=`rgba(35,32,27,${alpha})`;g.fillRect(a.x+off,30-(a.n.p-62)*1.7,Math.max(3,(a.n.d||.5)*16-2),3);});};
+  draw(0,.85);draw(x,.35);draw(x*2,.35);
+  g.fillStyle='#d2462a';g.fillRect(58,0,1.5,34);
+}
+render();
+</script>
+</body>
+</html>

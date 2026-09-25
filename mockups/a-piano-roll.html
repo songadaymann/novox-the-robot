@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NVS · A · Piano Roll + Lyric Lane</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --page:#0c0d0f; --bg:#15171a; --panel:#1b1e22; --panel2:#20242a; --line:#2a2f36; --line2:#343a42;
+    --text:#dde1e6; --dim:#8a929c; --faint:#5b626b;
+    --note:#e9a23b; --note2:#f5c46e; --noteText:#241503; --sel:#5fd4c4; --rec:#ff5a4f; --vowel:#f5c46e; --cons:#7fb4ff;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--page);color:var(--text);font:12px/1.35 Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  body{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;min-height:100vh}
+  .caption{color:#6b7179;font-size:11px;letter-spacing:.04em}
+  .caption a{color:#8fb8ff;text-decoration:none}
+  .win{width:1000px;height:640px;background:var(--bg);border-radius:10px;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.6),0 0 0 1px #000,inset 0 0 0 1px #262a30;display:flex;flex-direction:column;position:relative}
+  .mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+
+  /* header */
+  .hdr{height:46px;flex:none;display:flex;align-items:center;gap:12px;padding:0 12px;background:linear-gradient(#1f2327,#191c20);border-bottom:1px solid #0b0c0e}
+  .logo{white-space:nowrap;display:flex;align-items:center;gap:8px;font-weight:700;letter-spacing:.02em;font-size:13px;margin-right:4px}
+  .logo svg{display:block}
+  .logo small{display:block;font-weight:500;color:var(--dim);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;margin-top:-1px}
+  .seg{display:flex;background:#101215;border:1px solid #2b3037;border-radius:7px;padding:2px;gap:2px}
+  .seg button{all:unset;white-space:nowrap;cursor:pointer;padding:5px 11px;border-radius:5px;color:var(--dim);font-weight:500;display:flex;align-items:center;gap:6px}
+  .seg button:hover{color:var(--text);background:#1d2126}
+  .seg button.on{background:#2b3037;color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
+  .seg button .k{font-size:9.5px;color:var(--faint)}
+  .spacer{flex:1}
+  .voicepick{white-space:nowrap;display:flex;align-items:center;gap:8px;padding:4px 10px 4px 5px;border:1px solid var(--line2);border-radius:20px;cursor:pointer;background:#16191c}
+  .voicepick:hover{border-color:#4a525c}
+  .ava{width:24px;height:24px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ffd9a0,#e0913a);display:grid;place-items:center}
+  .voicepick b{font-weight:600}
+  .voicepick span{color:var(--dim)}
+  .chip{white-space:nowrap;display:flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid var(--line);border-radius:5px;color:var(--dim);background:#15181b}
+  .chip b{color:var(--text);font-weight:600}
+  .dot{width:7px;height:7px;border-radius:50%;background:#44d17a;box-shadow:0 0 6px #44d17a}
+  .tbtn{all:unset;cursor:pointer;width:30px;height:28px;border-radius:6px;display:grid;place-items:center;border:1px solid var(--line2);background:#1c2025}
+  .tbtn:hover{background:#252a30}
+  .tbtn.rec{color:var(--rec)}
+  .tbtn.rec.on{background:#3a1715;border-color:#7a2a24;animation:pulse 1s infinite}
+  .tbtn.play.on{background:#17352f;border-color:#2f6d62;color:var(--sel)}
+  @keyframes pulse{50%{box-shadow:0 0 0 3px rgba(255,90,79,.18)}}
+
+  /* body */
+  .body{flex:1;display:flex;min-height:0}
+  .main{flex:1;display:flex;flex-direction:column;min-width:0;border-right:1px solid #0b0c0e}
+  .view{display:none;flex:1;flex-direction:column;min-height:0}
+  .view.on{display:flex}
+
+  .rollwrap{position:relative;flex:1;display:grid;grid-template-columns:46px 1fr;grid-template-rows:22px 1fr 36px;min-height:0}
+  .corner{background:#181b1f;border-bottom:1px solid var(--line);border-right:1px solid var(--line)}
+  .ruler{position:relative;background:#181b1f;border-bottom:1px solid var(--line);overflow:hidden}
+  .ruler .t{position:absolute;top:0;height:100%;border-left:1px solid #30353c;font-size:10px;color:var(--dim);padding:4px 0 0 4px}
+  .ruler .t.beat{height:6px;top:auto;bottom:0;border-color:#30353c}
+  .keys{position:relative;border-right:1px solid var(--line);background:#101214}
+  .key{position:absolute;left:0;right:0;border-bottom:1px solid #1d2024;font-size:9px;color:#6e757d;display:flex;align-items:center;justify-content:flex-end;padding-right:5px}
+  .key.w{background:linear-gradient(90deg,#c9ced4,#e6e9ec 70%,#d4d8dc);color:#555}
+  .key.b{background:linear-gradient(90deg,#15171a,#2a2e33);color:#777}
+  .key.c{color:#222;font-weight:600}
+  .key.hot{background:var(--sel)!important;color:#022!important}
+  .grid{position:relative;overflow:hidden;background:#17191c;cursor:crosshair}
+  .row{position:absolute;left:0;right:0;border-bottom:1px solid #1f2226}
+  .row.b{background:#131518}
+  .vline{position:absolute;top:0;bottom:0;border-left:1px solid #1f2327}
+  .vline.bar{border-left-color:#343a42}
+  .note{position:absolute;border-radius:4px;background:linear-gradient(var(--note2),var(--note) 60%);color:var(--noteText);font-weight:600;font-size:11px;display:flex;align-items:center;padding:0 6px;cursor:grab;box-shadow:0 1px 0 rgba(0,0,0,.4),inset 0 0 0 1px rgba(0,0,0,.25);white-space:nowrap;overflow:hidden;transition:filter .1s}
+  .note:hover{filter:brightness(1.1)}
+  .note .h{position:absolute;right:0;top:0;bottom:0;width:5px;cursor:ew-resize;background:rgba(0,0,0,.12)}
+  .note.mel{background:repeating-linear-gradient(135deg,#b67d2b 0 5px,#c98d35 5px 10px);color:#2b1a04}
+  .note.sel{outline:2px solid var(--sel);outline-offset:1px;z-index:3}
+  .note.now{filter:brightness(1.25) saturate(1.2);box-shadow:0 0 14px rgba(245,196,110,.7)}
+  .note.empty{background:#3a3f46;color:#9aa3ad;font-style:italic}
+  .tie{position:absolute;height:0;border-top:1.5px dashed #c98d35;pointer-events:none;opacity:.8}
+  .playhead{position:absolute;top:0;bottom:0;width:1px;background:#fff;box-shadow:0 0 6px #fff;pointer-events:none;z-index:5}
+  .pitchline{position:absolute;inset:0;pointer-events:none;z-index:2}
+
+  .phcorner{background:#15171a;border-top:1px solid var(--line);border-right:1px solid var(--line);font-size:8.5px;letter-spacing:.12em;color:var(--faint);display:flex;align-items:center;justify-content:center;writing-mode:vertical-rl;transform:rotate(180deg)}
+  .phon{position:relative;background:#121417;border-top:1px solid var(--line);overflow:hidden}
+  .ph{position:absolute;top:5px;bottom:5px;border-radius:3px;display:flex;gap:1px;overflow:hidden;cursor:pointer}
+  .ph span{flex:1 1 auto;display:grid;place-items:center;font:500 9.5px "JetBrains Mono",monospace;min-width:0}
+  .ph .c{background:#1f2c40;color:var(--cons);flex:0 0 auto;padding:0 3px}
+  .ph .v{background:#3a2e17;color:var(--vowel)}
+  .ph.sel{outline:1px solid var(--sel)}
+
+  .lyr{flex:none;height:112px;border-top:1px solid #0b0c0e;background:#191c20;padding:9px 12px 8px;display:flex;flex-direction:column;gap:7px}
+  .lyrtop{display:flex;align-items:center;gap:10px}
+  .lbl{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:600}
+  .lyrin{flex:1;background:#101215;border:1px solid #2d333a;border-radius:6px;color:#fff;padding:7px 10px;font:500 14px "JetBrains Mono",monospace;outline:none}
+  .lyrin:focus{border-color:var(--sel);box-shadow:0 0 0 3px rgba(95,212,196,.12)}
+  .status{font-size:11px;color:#6ad49a;white-space:nowrap}
+  .status.warn{color:#f0b35a}
+  .tokens{display:flex;gap:3px;flex-wrap:nowrap;overflow:hidden}
+  .tok{display:flex;align-items:center;gap:3px;padding:2px 6px 2px 3px;border-radius:5px;background:#22262c;border:1px solid #2e343b;cursor:pointer;font:500 11px "JetBrains Mono",monospace}
+  .tok i{font-style:normal;font-size:9px;color:var(--faint);min-width:12px;text-align:right}
+  .tok:hover{border-color:#4a525c}
+  .tok.sel{border-color:var(--sel);background:#173430;color:#bff5ec}
+  .tok.hold{color:#c98d35}
+  .tok.orphan{border-style:dashed;color:#f0b35a}
+  .hint{white-space:nowrap;overflow:hidden;font-size:10.5px;color:var(--faint)}
+  .hint kbd{font:500 10px "JetBrains Mono",monospace;background:#23272d;border:1px solid #333941;border-bottom-width:2px;border-radius:3px;padding:0 4px;color:#b8bec6}
+
+  /* side */
+  .side{width:262px;flex:none;background:var(--panel);display:flex;flex-direction:column;overflow:hidden}
+  .sec{padding:12px 14px;border-bottom:1px solid #111316}
+  .sech{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .big{font-size:22px;font-weight:700;letter-spacing:-.01em}
+  .kv{display:grid;grid-template-columns:62px 1fr;gap:6px 8px;align-items:center}
+  .kv label{color:var(--dim);font-size:11px}
+  .field{background:#131518;border:1px solid #2a2f36;border-radius:5px;padding:4px 7px;font:500 11.5px "JetBrains Mono",monospace;color:#fff}
+  .field.ph2{display:flex;gap:3px;flex-wrap:wrap;padding:3px}
+  .field.ph2 span{padding:1px 4px;border-radius:3px;font-size:10.5px}
+  .btnrow{display:flex;gap:6px;margin-top:10px}
+  .btn{all:unset;cursor:pointer;flex:1;text-align:center;padding:6px 0;border:1px solid var(--line2);border-radius:5px;background:#23272d;font-size:11px;color:#cfd4da}
+  .btn:hover{background:#2b3037;color:#fff}
+  .btn.acc{background:#1a3a35;border-color:#2f6d62;color:#bff5ec}
+  .sl{display:grid;grid-template-columns:70px 1fr 34px;align-items:center;gap:8px;margin:7px 0}
+  .sl label{color:var(--dim);font-size:11px}
+  .sl output{font:500 10.5px "JetBrains Mono",monospace;color:#c8ced5;text-align:right}
+  input[type=range]{-webkit-appearance:none;appearance:none;height:4px;border-radius:2px;background:#2a2f36;outline:none;width:100%}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:#e8ecf0;border:2px solid #15171a;box-shadow:0 0 0 1px #555}
+  .vcard{display:flex;gap:10px;align-items:center;margin-bottom:6px}
+  .vcard .ava{width:38px;height:38px}
+  .vcard b{display:block;font-size:13px}
+  .vcard span{color:var(--dim);font-size:11px}
+  .link{color:var(--sel);cursor:pointer;font-size:11px}
+  .link:hover{text-decoration:underline}
+  .foot{height:24px;flex:none;border-top:1px solid #0b0c0e;background:#121417;display:flex;align-items:center;gap:16px;padding:0 12px;color:var(--faint);font-size:10.5px}
+  .foot b{color:var(--dim);font-weight:500}
+
+  /* audio view */
+  .drop{margin:26px;flex:1;border:1.5px dashed #3b424b;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--dim);background:repeating-linear-gradient(135deg,#16191c 0 12px,#15171a 12px 24px)}
+  .drop:hover{border-color:var(--sel);color:#cfd4da}
+  .drop h2{margin:0;color:#e8ecf0;font-size:18px;font-weight:600}
+  .steps{display:flex;gap:10px;margin-top:8px}
+  .step{padding:8px 12px;border:1px solid var(--line2);border-radius:8px;background:#1b1e22;font-size:11px;width:170px}
+  .step b{display:block;color:#fff;margin-bottom:2px}
+  /* voice view */
+  .vgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:16px;overflow:auto}
+  .vc{border:1px solid var(--line);border-radius:8px;padding:10px;background:#1a1d21;cursor:pointer;display:flex;gap:9px;align-items:center}
+  .vc:hover{border-color:#4a525c}
+  .vc.on{border-color:var(--sel);background:#15302c}
+  .vc .ava{width:30px;height:30px;flex:none}
+  .vc b{display:block;font-size:12px}
+  .vc span{color:var(--dim);font-size:10.5px}
+  .grp{padding:14px 16px 0;color:var(--dim);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;font-weight:600}
+</style>
+</head>
+<body>
+<div class="win">
+  <div class="hdr">
+    <div class="logo">
+      <svg width="26" height="26" viewBox="0 0 26 26"><rect width="26" height="26" rx="6" fill="#e9a23b"/><path d="M5 14c2 0 2-6 4-6s2 10 4 10 2-12 4-12 2 8 4 8" stroke="#241503" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      <div>New Virtual Singer<small>Piano Roll</small></div>
+    </div>
+    <div class="seg" id="modes">
+      <button class="on" data-v="roll"><svg width="13" height="11" viewBox="0 0 13 11"><rect x=".5" y=".5" width="12" height="10" rx="1.5" fill="none" stroke="currentColor"/><path d="M4 1v6M7 1v6M10 1v6" stroke="currentColor"/></svg>MIDI + Lyrics</button>
+      <button data-v="audio"><svg width="13" height="11" viewBox="0 0 13 11"><path d="M1 5.5h2l1.5-4 2 8 2-6 1.5 2h2" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>Audio In</button>
+      <button data-v="voice"><svg width="11" height="11" viewBox="0 0 11 11"><circle cx="5.5" cy="5.5" r="5" fill="none" stroke="currentColor"/><circle cx="3.8" cy="4.3" r=".8" fill="currentColor"/><circle cx="7.2" cy="4.3" r=".8" fill="currentColor"/><ellipse cx="5.5" cy="7.4" rx="1.2" ry="1" fill="currentColor"/></svg>Voices</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="voicepick" id="vp" title="Choose voice">
+      <div class="ava"><svg width="14" height="14" viewBox="0 0 14 14"><circle cx="4.5" cy="5" r="1.2" fill="#3b2408"/><circle cx="9.5" cy="5" r="1.2" fill="#3b2408"/><ellipse cx="7" cy="9.6" rx="2" ry="1.6" fill="#3b2408"/></svg></div>
+      <b id="vpname">Std Voice</b><span>▾</span>
+    </div>
+    <div class="chip" title="Following DAW region"><span class="dot"></span><b>Track 4</b></div>
+    <div class="chip mono"><b>92</b> BPM · <b>C</b> maj</div>
+    <button class="tbtn rec" id="rec" title="Capture MIDI from keyboard"><svg width="12" height="12"><circle cx="6" cy="6" r="5" fill="currentColor"/></svg></button>
+    <button class="tbtn play" id="play" title="Preview (space)"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 1l9 5-9 5z" fill="currentColor"/></svg></button>
+  </div>
+
+  <div class="body">
+    <div class="main">
+      <!-- ROLL VIEW -->
+      <div class="view on" id="v-roll">
+        <div class="rollwrap">
+          <div class="corner"></div>
+          <div class="ruler" id="ruler"></div>
+          <div class="keys" id="keys"></div>
+          <div class="grid" id="grid"></div>
+          <div class="phcorner">PHONEMES</div>
+          <div class="phon" id="phon"></div>
+        </div>
+        <div class="lyr">
+          <div class="lyrtop">
+            <span class="lbl">Lyrics</span>
+            <input class="lyrin" id="lyrin" spellcheck="false" value="the ket-tle sings at sev-en, and I hum a-long _ _">
+            <span class="status" id="stat">13 syllables → 13 notes</span>
+          </div>
+          <div class="tokens" id="tokens"></div>
+          <div class="hint"><kbd>-</kbd> split syllable &nbsp;·&nbsp; <kbd>_</kbd> hold (melisma) &nbsp;·&nbsp; <kbd>+</kbd> two words, one note &nbsp;·&nbsp; <kbd>⌥→</kbd> push syllables right &nbsp;<kbd>⌥←</kbd> pull left</div>
+        </div>
+      </div>
+
+      <!-- AUDIO VIEW -->
+      <div class="view" id="v-audio">
+        <div class="drop">
+          <svg width="46" height="46" viewBox="0 0 46 46" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="8" width="38" height="30" rx="5"/><path d="M10 23h3l2-6 3 12 3-16 3 18 3-12 2 4h7"/></svg>
+          <h2>Drop a sung vocal here</h2>
+          <div>Drag a region from Logic's tracks area, or a .wav / .aif / .m4a file</div>
+          <div class="steps">
+            <div class="step"><b>1 · Pitch</b>Tracks the melody and splits it into notes</div>
+            <div class="step"><b>2 · Words</b>Transcribes lyrics with word timing</div>
+            <div class="step"><b>3 · Review</b>Fix low-confidence words, then “Accept → Notes”</div>
+          </div>
+          <div style="margin-top:6px"><span class="link" onclick="go('roll')">Results land in the piano roll ›</span></div>
+        </div>
+      </div>
+
+      <!-- VOICE VIEW -->
+      <div class="view" id="v-voice" style="overflow:auto">
+        <div class="grp">Classic</div>
+        <div class="vgrid" id="vg1"></div>
+        <div class="grp">Choirs</div>
+        <div class="vgrid" id="vg2"></div>
+      </div>
+    </div>
+
+    <!-- SIDE -->
+    <div class="side">
+      <div class="sec">
+        <div class="sech"><span class="lbl">Selected note</span><span class="mono" style="color:var(--faint)" id="nidx">#6 of 13</span></div>
+        <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px"><span class="big" id="nsyl">sev</span><span class="mono" style="color:var(--dim)" id="npitch">E5 · 0.75 beat</span></div>
+        <div class="kv">
+          <label>Phonemes</label><div class="field ph2" id="nph"></div>
+          <label>Start</label><div class="field" id="nstart">1.4.001</div>
+          <label>Velocity</label><div class="field">96</div>
+        </div>
+        <div class="btnrow">
+          <button class="btn" id="bHold" title="Insert a hold (_) here and push later syllables right">+ Hold here</button>
+          <button class="btn" id="bPull" title="Remove this hold / pull next syllable onto this note">Pull next ←</button>
+        </div>
+        <div class="sl" style="margin-top:12px"><label>Vibrato</label><input type="range" value="60"><output>60%</output></div>
+        <div class="sl"><label>Scoop in</label><input type="range" value="25"><output>25%</output></div>
+        <div class="sl"><label>Accent</label><input type="range" value="40"><output>40%</output></div>
+      </div>
+      <div class="sec" style="flex:1">
+        <div class="sech"><span class="lbl">Voice</span><span class="link" onclick="go('voice')">All voices ›</span></div>
+        <div class="vcard">
+          <div class="ava"><svg width="22" height="22" viewBox="0 0 14 14"><circle cx="4.5" cy="5" r="1.2" fill="#3b2408"/><circle cx="9.5" cy="5" r="1.2" fill="#3b2408"/><ellipse cx="7" cy="9.6" rx="2" ry="1.6" fill="#3b2408"/></svg></div>
+          <div><b id="vname">Std Voice</b><span>Formant synth · mono</span></div>
+        </div>
+        <div class="sl"><label>Size</label><input type="range" value="50"><output>0 st</output></div>
+        <div class="sl"><label>Breath</label><input type="range" value="22"><output>22%</output></div>
+        <div class="sl"><label>Vib rate</label><input type="range" value="48"><output>5.4Hz</output></div>
+        <div class="sl"><label>Humanize</label><input type="range" value="35"><output>35%</output></div>
+        <div class="sl"><label>Ring</label><input type="range" value="55"><output>55%</output></div>
+        <div class="sl"><label>Grit</label><input type="range" value="10"><output>10%</output></div>
+        <div class="sl"><label>Choir</label><input type="range" value="0" max="16"><output>solo</output></div>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span>Input: <b>DAW region “Verse vox idea”</b></span><span>Grid: <b>1/16</b></span><span>Snap lyrics to: <b>note starts</b></span><span class="spacer"></span><span>CPU <b>3%</b></span><span>v0.1 mockup</span></div>
+</div>
+<div class="caption">Mockup A — Piano roll + lyric lane · <a href="index.html">← all mockups</a></div>
+
+<script>
+const PPB=76, ROW=26, LO=64, HI=79, BEATS=9;
+const NAMES=['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
+const nn=m=>NAMES[m%12]+(Math.floor(m/12)-1);
+const notes=[
+  [67,0,.5],[72,.5,.75],[71,1.25,.25],[69,1.5,1],[67,2.5,.5],[76,3,.75],[74,3.75,.25],
+  [72,4,.5],[74,4.5,.5],[76,5,.5],[74,5.5,.5],[72,6,1],[71,7,.5],[72,7.5,1.25]
+].map(([p,s,d])=>({p,s,d}));
+const DICT={the:['DH','AH'],ket:['K','EH','T'],tle:['T','AH','L'],sings:['S','IH','NG','Z'],at:['AE','T'],sev:['S','EH','V'],en:['AH','N'],and:['AE','N','D'],i:['AY'],hum:['HH','AH','M'],a:['AH'],long:['L','AO','NG'],kettle:['K','EH','T','AH','L'],
+  hap:['HH','AE','P'],py:['P','IY'],you:['Y','UW'],to:['T','UW'],me:['M','IY'],my:['M','AY'],sing:['S','IH','NG']};
+const VOW=new Set(['AA','AE','AH','AO','AW','AY','EH','ER','EY','IH','IY','OW','OY','UH','UW']);
+function phon(s){const k=s.toLowerCase().replace(/[^a-z]/g,'');if(DICT[k])return DICT[k];
+  // naive fallback: letters→rough phones
+  const out=[];for(const ch of k){if('aeiou'.includes(ch))out.push({a:'AE',e:'EH',i:'IH',o:'AO',u:'AH'}[ch]);else out.push(ch.toUpperCase())}return out.length?out:['AH']}
+
+let sel=5, tokens=[];
+const $=id=>document.getElementById(id);
+const grid=$('grid'), keys=$('keys');
+
+function tokenize(text){
+  const t=[];text.trim().split(/\s+/).forEach(w=>{if(!w)return;
+    if(/^_+$/.test(w)){for(const _ of w)t.push({s:'_',hold:true});return;}
+    const parts=w.split('-');parts.forEach((p,i)=>{if(p==='')return;
+      const clean=p.replace(/[,.;!?]/g,'');t.push({s:clean.replace(/\+/g,' '),raw:p,join:i<parts.length-1});});
+  });return t;}
+function serialize(){return tokens.map((t,i)=>t.hold?'_':t.raw+(t.join?'-':'')).join(' ').replace(/- /g,'-');}
+
+function drawStatic(){
+  const r=$('ruler');r.innerHTML='';
+  for(let m=HI;m>=LO;m--){const y=(HI-m)*ROW;const black=[1,3,6,8,10].includes(m%12);
+    const row=document.createElement('div');row.className='row'+(black?' b':'');row.style.top=y+'px';row.style.height=ROW+'px';grid.appendChild(row);
+    const k=document.createElement('div');k.className='key '+(black?'b':'w')+(m%12===0?' c':'');k.style.top=y+'px';k.style.height=ROW+'px';k.dataset.m=m;k.textContent=(m%12===0||m%12===7)?nn(m):'';keys.appendChild(k);}
+  for(let b=0;b<=BEATS;b++){const d=document.createElement('div');d.className='t'+(b%4?' beat':'');d.style.left=b*PPB+'px';if(b%4===0)d.textContent=(b/4+1);r.appendChild(d);
+    const v=document.createElement('div');v.className='vline'+(b%4?'':' bar');v.style.left=b*PPB+'px';grid.appendChild(v);
+    for(let q=1;q<4;q++){const s=document.createElement('div');s.className='vline';s.style.left=(b+q/4)*PPB+'px';s.style.borderLeftColor='#1a1d20';grid.appendChild(s);}
+  }
+}
+
+function render(){
+  grid.querySelectorAll('.note,.tie,.playhead,svg').forEach(e=>e.remove());
+  const ph=$('phon');ph.innerHTML='';
+  // assign syllables to notes
+  let last='';
+  // pitch curve
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('class','pitchline');svg.setAttribute('width',BEATS*PPB);svg.setAttribute('height',(HI-LO+1)*ROW);
+  let d='';notes.forEach((n,i)=>{const y=(HI-n.p)*ROW+ROW/2, x0=n.s*PPB, x1=(n.s+n.d)*PPB;
+    if(i===0)d+=`M${x0} ${y+8}`;const scoop=Math.min(14,(x1-x0)/3);d+=` Q${x0} ${y} ${x0+scoop} ${y}`;
+    for(let x=x0+scoop;x<x1-6;x+=4){d+=` L${x} ${y+Math.sin((x-x0)/5)*(x-x0>40?2.2:0.4)}`}d+=` L${x1-3} ${y}`;});
+  svg.innerHTML=`<path d="${d}" stroke="rgba(255,255,255,.35)" stroke-width="1.2" fill="none"/>`;grid.appendChild(svg);
+
+  notes.forEach((n,i)=>{
+    const t=tokens[i];const el=document.createElement('div');
+    el.className='note'+(t&&t.hold?' mel':'')+(!t?' empty':'')+(i===sel?' sel':'');
+    el.style.left=n.s*PPB+1+'px';el.style.width=n.d*PPB-2+'px';el.style.top=(HI-n.p)*ROW+2+'px';el.style.height=ROW-4+'px';
+    el.innerHTML=(t?(t.hold?'—':t.s+(t.join?'-':'')):'∅')+'<div class="h"></div>';el.title=nn(n.p)+(t?' · '+(t.hold?'hold “'+last+'”':t.s):'');
+    el.onclick=e=>{e.stopPropagation();select(i)};grid.appendChild(el);
+    // phonemes
+    const p=document.createElement('div');p.className='ph'+(i===sel?' sel':'');p.style.left=n.s*PPB+1+'px';p.style.width=n.d*PPB-2+'px';
+    if(t){const list=t.hold?[phon(last).filter(x=>VOW.has(x)).pop()||'AH']:phon(t.s);
+      if(!t.hold)last=t.s;
+      p.innerHTML=list.map(x=>`<span class="${VOW.has(x)?'v':'c'}">${n.d<.3&&!VOW.has(x)?'':x}</span>`).join('');}
+    p.onclick=()=>select(i);ph.appendChild(p);
+  });
+  // tokens
+  const tk=$('tokens');tk.innerHTML='';
+  tokens.forEach((t,i)=>{const e=document.createElement('div');e.className='tok'+(t.hold?' hold':'')+(i===sel?' sel':'')+(i>=notes.length?' orphan':'');
+    e.innerHTML=`<i>${i+1}</i>${t.hold?'—':t.s+(t.join?'-':'')}`;e.onclick=()=>select(i);tk.appendChild(e);});
+  const st=$('stat');const ns=tokens.length, nnn=notes.length;
+  st.textContent=ns===nnn?`✓ ${ns} syllables → ${nnn} notes`:ns>nnn?`${ns-nnn} extra syllable${ns-nnn>1?'s':''} (no note)`:`${nnn-ns} note${nnn-ns>1?'s':''} without lyrics`;
+  st.className='status'+(ns===nnn?'':' warn');
+  inspector();
+}
+function inspector(){
+  const n=notes[sel];if(!n)return;const t=tokens[sel];
+  $('nidx').textContent=`#${sel+1} of ${notes.length}`;
+  $('nsyl').textContent=t?(t.hold?'— hold':t.s):'∅';
+  $('npitch').textContent=`${nn(n.p)} · ${n.d} beat`;
+  const bar=Math.floor(n.s/4)+1, beat=Math.floor(n.s%4)+1, tick=Math.round((n.s%1)*960)+1;
+  $('nstart').textContent=`${bar}.${beat}.${String(tick).padStart(3,'0')}`;
+  let src=t;if(t&&t.hold){for(let j=sel;j>=0;j--)if(!tokens[j].hold){src=tokens[j];break}}
+  const ps=src&&!src.hold?(t.hold?[phon(src.s).filter(x=>VOW.has(x)).pop()]:phon(src.s)):[];
+  $('nph').innerHTML=ps.map(x=>`<span style="background:${VOW.has(x)?'#3a2e17':'#1f2c40'};color:${VOW.has(x)?'var(--vowel)':'var(--cons)'}">${x}</span>`).join('')||'<span style="color:#666">—</span>';
+  keys.querySelectorAll('.key').forEach(k=>k.classList.toggle('hot',+k.dataset.m===n.p));
+}
+function select(i){sel=Math.max(0,Math.min(notes.length-1,i));render();}
+function setText(){tokens=tokenize($('lyrin').value);render();}
+$('lyrin').addEventListener('input',setText);
+$('lyrin').addEventListener('keydown',e=>{if(e.altKey&&(e.key==='ArrowRight'||e.key==='ArrowLeft')){e.preventDefault();e.key==='ArrowRight'?hold():pull();}});
+function hold(){tokens.splice(sel,0,{s:'_',hold:true});$('lyrin').value=serialize();render();}
+function pull(){if(tokens[sel]&&tokens[sel].hold)tokens.splice(sel,1);else{const j=tokens.findIndex((t,k)=>k>sel&&t.hold);if(j>0)tokens.splice(j,1);}$('lyrin').value=serialize();render();}
+$('bHold').onclick=hold;$('bPull').onclick=pull;
+document.addEventListener('keydown',e=>{if(document.activeElement===$('lyrin'))return;
+  if(e.key==='ArrowRight'){select(sel+1)}if(e.key==='ArrowLeft'){select(sel-1)}if(e.code==='Space'){e.preventDefault();togglePlay()}});
+
+// modes
+function go(v){document.querySelectorAll('#modes button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));document.querySelectorAll('.view').forEach(x=>x.classList.toggle('on',x.id==='v-'+v));}
+document.querySelectorAll('#modes button').forEach(b=>b.onclick=()=>go(b.dataset.v));
+$('vp').onclick=()=>go('voice');
+
+// voices
+const V1=['Std Voice','Karaoke Voice','Male','Female','Kid','Soprano','Alto','Tenor','Bass','Sopranino','Gregorian','High Male','Quick Vibrato','Modern · Ada','Modern · Otto','Modern · Juno'];
+const V2=['Male Choir','Female Choir','Bass Choir','Gregorian Choir'];
+const hue=s=>[...s].reduce((a,c)=>a+c.charCodeAt(0),0)%360;
+function vcard(n,box,extra){const d=document.createElement('div');d.className='vc'+(n===$('vname').textContent?' on':'');const h=hue(n);
+  d.innerHTML=`<div class="ava" style="background:radial-gradient(circle at 35% 30%,hsl(${h} 80% 80%),hsl(${h} 55% 50%))"><svg width="16" height="16" viewBox="0 0 14 14"><circle cx="4.5" cy="5" r="1.2" fill="#222"/><circle cx="9.5" cy="5" r="1.2" fill="#222"/><ellipse cx="7" cy="9.6" rx="${1+h%3*.6}" ry="1.6" fill="#222"/></svg></div><div><b>${n}</b><span>${extra}</span></div>`;
+  d.onclick=()=>{$('vname').textContent=n;$('vpname').textContent=n;box.parentNode.querySelectorAll('.vc').forEach(x=>x.classList.remove('on'));d.classList.add('on');};box.appendChild(d);}
+V1.forEach(n=>vcard(n,$('vg1'),n.startsWith('Modern')?'Modern singer':'Solo'));
+V2.forEach(n=>vcard(n,$('vg2'),'8 voices · detune 12¢'));
+
+// transport
+let playing=false,raf,t0;
+function togglePlay(){playing=!playing;$('play').classList.toggle('on',playing);
+  if(playing){t0=performance.now();const ph=document.createElement('div');ph.className='playhead';ph.id='ph';grid.appendChild(ph);
+    const step=()=>{const b=((performance.now()-t0)/1000)*(92/60);if(b>BEATS){togglePlay();return}
+      const el=$('ph');if(el)el.style.left=b*PPB+'px';
+      grid.querySelectorAll('.note').forEach((e,i)=>e.classList.toggle('now',notes[i]&&b>=notes[i].s&&b<notes[i].s+notes[i].d));
+      raf=requestAnimationFrame(step)};step();}
+  else{cancelAnimationFrame(raf);const p=$('ph');p&&p.remove();grid.querySelectorAll('.note').forEach(e=>e.classList.remove('now'));}}
+$('play').onclick=togglePlay;
+$('rec').onclick=()=>$('rec').classList.toggle('on');
+document.querySelectorAll('.sl input').forEach(r=>r.addEventListener('input',()=>{const o=r.nextElementSibling;if(o.textContent.endsWith('%'))o.textContent=r.value+'%'}));
+
+drawStatic();setText();
+</script>
+</body>
+</html>

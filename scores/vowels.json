@@ -1,0 +1,11 @@
+{
+  // Vowel inventory in h_d frames, each held on one pitch: for measuring formants.
+  "tempo": 60,
+  "voice": "std",
+  "lyrics": "heed hid head had hod hawk hood who'd hud heard hate hide how'd hope hoist",
+  "notes": [
+    "A3 1.5", "r 0.5", "A3 1.5", "r 0.5", "A3 1.5", "r 0.5", "A3 1.5", "r 0.5", "A3 1.5", "r 0.5",
+    "A3 1.5", "r 0.5", "A3 1.5", "r 0.5", "A3 1.5", "r 0.5", "A3 1.5", "r 0.5", "A3 1.5", "r 0.5",
+    "A3 1.5", "r 0.5", "A3 1.5", "r 0.5", "A3 1.5", "r 0.5", "A3 1.5", "r 0.5", "A3 1.5", "r 0.5"
+  ]
+}

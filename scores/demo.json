@@ -1,0 +1,16 @@
+{
+  // A short original demo line. Lyrics flow onto the notes automatically:
+  // multi-syllable words take one note per syllable, "_" holds a vowel.
+  "tempo": 92,
+  "voice": "std",
+  "dictionary": { "hugh": "HH Y UW1" },
+  "lyrics": "hel-lo, my name is Hugh, I sing a song for you _ _ ev-ery sin-gle day, all year",
+  "notes": [
+    "E4 0.5", "G4 1", "r 0.5",
+    "G4 0.5", "A4 0.5", "G4 0.5", "E4 1.5",
+    "r 0.5",
+    "C4 0.5", "D4 0.5", "E4 0.5", "G4 0.5", "A4 0.5", "G4 1", "E4 0.5", "D4 1.5",
+    "r 0.5",
+    "E4 0.5", "E4 0.25", "D4 0.25", "E4 0.5", "G4 0.5", "A4 0.5", "C5 2.5"
+  ]
+}

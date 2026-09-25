@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NVS · D · Voice Designer</title>
+<style>
+  :root{--page:#1d1f22;--ui:"Lucida Grande","Lucida Sans Unicode","Lucida Sans",Geneva,Verdana,sans-serif;--blue:#3b8ee8;--ink:#1c1c1c;--dim:#5d5d5d}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:radial-gradient(ellipse at 50% 30%,#2b3a4d,#15181c 70%);font:11px/1.35 var(--ui);color:var(--ink);-webkit-font-smoothing:antialiased}
+  body{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;min-height:100vh}
+  .caption{color:#8b93a0;font-size:11px}.caption a{color:#8fb8ff;text-decoration:none}
+  .win{width:1000px;height:640px;border-radius:7px 7px 5px 5px;overflow:hidden;display:flex;flex-direction:column;position:relative;
+    background:repeating-linear-gradient(#ececec 0 2px,#f6f6f6 2px 4px);box-shadow:0 22px 60px rgba(0,0,0,.6),0 0 0 1px rgba(0,0,0,.55)}
+
+  /* title bar + toolbar (unified) */
+  .tb{flex:none;background:linear-gradient(#e9e9e9,#d2d2d2 55%,#c4c4c4);border-bottom:1px solid #8c8c8c;box-shadow:inset 0 1px 0 #fff}
+  .title{height:22px;display:flex;align-items:center;position:relative}
+  .lights{display:flex;gap:7px;padding-left:9px}
+  .lights i{width:13px;height:13px;border-radius:50%;display:block;position:relative;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.45),0 1px 1px rgba(0,0,0,.15)}
+  .lights i::after{content:"";position:absolute;left:3px;right:3px;top:1px;height:5px;border-radius:50%;background:linear-gradient(rgba(255,255,255,.95),rgba(255,255,255,.1))}
+  .lights i:nth-child(1){background:radial-gradient(circle at 50% 75%,#ffb3a6,#e0321f 60%,#9e1a0c)}
+  .lights i:nth-child(2){background:radial-gradient(circle at 50% 75%,#ffe7a6,#e6a619 60%,#9e6c05)}
+  .lights i:nth-child(3){background:radial-gradient(circle at 50% 75%,#c6f7a8,#48b12a 60%,#26700f)}
+  .title b{position:absolute;left:0;right:0;text-align:center;font-weight:normal;font-size:12.5px;color:#222;text-shadow:0 1px 0 rgba(255,255,255,.7);pointer-events:none}
+  .tools{height:52px;display:flex;align-items:center;gap:14px;padding:0 12px}
+  .seg{display:flex;border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,.35),inset 0 0 0 1px rgba(0,0,0,.35);overflow:hidden}
+  .seg button{all:unset;cursor:pointer;padding:4px 14px;font:12px var(--ui);background:linear-gradient(#fdfdfd,#ececec 50%,#dcdcdc 51%,#f3f3f3);border-right:1px solid #9a9a9a;color:#111;white-space:nowrap}
+  .seg button:last-child{border:none}
+  .seg button:active{background:linear-gradient(#e0e0e0,#c9c9c9)}
+  .seg button.on{background:linear-gradient(#cfe5ff,#6fb2f7 48%,#3d8ee9 52%,#8fcaff);color:#001a3a;text-shadow:0 1px 0 rgba(255,255,255,.5)}
+  .sp{flex:1}
+  .gel{all:unset;cursor:pointer;position:relative;padding:4px 16px;border-radius:12px;font:12px var(--ui);color:#001a3a;white-space:nowrap;
+    background:linear-gradient(#bfe0ff,#5aa8f4 48%,#2f84e3 52%,#9fd2ff);box-shadow:0 1px 2px rgba(0,0,0,.4),inset 0 0 0 1px rgba(0,40,110,.45)}
+  .gel::before{content:"";position:absolute;left:6px;right:6px;top:1px;height:45%;border-radius:10px 10px 6px 6px;background:linear-gradient(rgba(255,255,255,.9),rgba(255,255,255,.15))}
+  .gel.white{color:#111;background:linear-gradient(#fff,#ececec 48%,#d9d9d9 52%,#f7f7f7);box-shadow:0 1px 2px rgba(0,0,0,.35),inset 0 0 0 1px rgba(0,0,0,.35)}
+  .gel.on{animation:throb 1.2s infinite}
+  @keyframes throb{50%{filter:brightness(1.15) saturate(1.2)}}
+  .lcd{min-width:220px;height:34px;border-radius:6px;padding:3px 10px;font:11px/1.25 Monaco,Menlo,monospace;color:#1d2b12;background:linear-gradient(#cfdcaa,#b7c98c);box-shadow:inset 0 1px 3px rgba(0,0,0,.45),0 1px 0 #fff}
+  .lcd b{font-weight:bold}
+
+  .content{flex:1;display:flex;gap:10px;padding:10px;min-height:0}
+  .box{background:rgba(255,255,255,.5);border:1px solid #a9a9a9;border-radius:5px;box-shadow:inset 0 1px 2px rgba(0,0,0,.08);position:relative;padding:14px 10px 10px}
+  .box>h3{position:absolute;top:-8px;left:10px;margin:0;font:bold 11px var(--ui);background:#f1f1f1;padding:0 5px;color:#222}
+  .page{display:none;flex:1;gap:10px;min-height:0}
+  .page.on{display:flex}
+
+  /* gallery */
+  .gal{width:248px;flex:none;display:flex;flex-direction:column;background:#fff;border:1px solid #8e8e8e;box-shadow:inset 0 1px 2px rgba(0,0,0,.2)}
+  .galh{height:24px;flex:none;display:flex;align-items:center;gap:6px;padding:0 6px;background:linear-gradient(#f7f7f7,#dedede);border-bottom:1px solid #a0a0a0;font-size:11px}
+  .search{flex:1;height:18px;border-radius:9px;border:1px solid #8e8e8e;background:#fff;box-shadow:inset 0 1px 2px rgba(0,0,0,.25);padding:0 8px;font:11px var(--ui);color:#777;display:flex;align-items:center}
+  .cards{flex:1;overflow:auto;display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:6px;align-content:start}
+  .gcat{grid-column:1/-1;font:bold 10px var(--ui);color:#666;padding:6px 2px 2px;border-bottom:1px solid #ddd;margin-bottom:2px;text-transform:uppercase;letter-spacing:.05em}
+  .card{display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 2px 5px;border-radius:5px;cursor:pointer;border:1px solid transparent}
+  .card:hover{background:#eef4fc}
+  .card.on{background:linear-gradient(#6fb2f7,#3d8ee9);color:#fff;border-color:#2a6fc2}
+  .card svg{display:block;filter:drop-shadow(0 1px 1px rgba(0,0,0,.25))}
+  .card span{font-size:10.5px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:84px}
+  .galf{height:24px;flex:none;border-top:1px solid #a0a0a0;background:linear-gradient(#f7f7f7,#dedede);display:flex;align-items:center;gap:0}
+  .galf button{all:unset;cursor:pointer;width:26px;height:22px;display:grid;place-items:center;border-right:1px solid #b5b5b5;font-size:13px;color:#333}
+  .galf span{padding:0 8px;color:#666;font-size:10.5px}
+
+  /* face + formant */
+  .mid{width:250px;flex:none;display:flex;flex-direction:column;gap:12px}
+  .stagebox{flex:none;height:250px;display:flex;flex-direction:column;align-items:center}
+  .vname{font:bold 15px var(--ui);margin-top:2px}
+  .vsub{color:var(--dim);font-size:10.5px;margin-bottom:2px}
+  .vowels{display:flex;gap:3px;margin-top:4px}
+  .vowels button{all:unset;cursor:pointer;width:28px;height:20px;text-align:center;border-radius:4px;font:bold 11px var(--ui);background:linear-gradient(#fff,#e2e2e2);border:1px solid #9a9a9a}
+  .vowels button.on{background:linear-gradient(#cfe5ff,#5aa8f4);border-color:#2f6fb8;color:#00224d}
+  .chart{flex:1;min-height:0}
+  .chart svg{display:block;cursor:crosshair}
+
+  /* params */
+  .params{flex:1;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto auto auto 1fr;gap:12px 10px;min-width:0}
+  .knobs{display:flex;justify-content:space-around;gap:2px}
+  .kn{display:flex;flex-direction:column;align-items:center;gap:1px;width:60px;user-select:none}
+  .kn svg{cursor:ns-resize;display:block}
+  .kn label{font-size:10.5px;color:#222}
+  .kn output{font:10px Monaco,Menlo,monospace;color:#2b5f9e;background:#fff;border:1px solid #bbb;border-radius:3px;padding:0 4px;min-width:42px;text-align:center;box-shadow:inset 0 1px 1px rgba(0,0,0,.1)}
+  .hs{display:grid;grid-template-columns:78px 1fr 44px;align-items:center;gap:6px;margin:7px 0}
+  .hs label{text-align:right}
+  .hs output{font:10px Monaco,Menlo,monospace;color:#2b5f9e}
+  .hs input{min-width:0;width:100%}
+  input[type=range]{-webkit-appearance:none;appearance:none;height:5px;border-radius:3px;background:linear-gradient(#9b9b9b,#dcdcdc);box-shadow:inset 0 1px 1px rgba(0,0,0,.35);outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:17px;border-radius:50% 50% 50% 50%/40% 40% 60% 60%;background:radial-gradient(circle at 50% 30%,#fff,#9cc9f8 45%,#3a86df);box-shadow:0 1px 2px rgba(0,0,0,.5),inset 0 0 0 1px rgba(0,50,120,.5)}
+  .choir{display:flex;align-items:center;gap:16px}
+  .crowd{flex:1;height:58px;display:flex;align-items:flex-end;gap:0;overflow:hidden;padding-left:4px}
+  .crowd svg{margin-left:-6px;transition:transform .2s}
+  .step{display:flex;align-items:center;gap:4px}
+  .step button{all:unset;cursor:pointer;width:18px;height:11px;display:grid;place-items:center;font-size:7px;background:linear-gradient(#fff,#ddd);border:1px solid #999}
+  .step button:first-child{border-radius:4px 4px 0 0}
+  .step button:last-child{border-radius:0 0 4px 4px;border-top:none}
+  .num{font:bold 18px Monaco,Menlo,monospace;width:34px;text-align:right}
+
+  .status{height:22px;flex:none;border-top:1px solid #9a9a9a;background:linear-gradient(#e3e3e3,#cfcfcf);display:flex;align-items:center;gap:12px;padding:0 10px;color:#333;font-size:10.5px}
+  .status .grow{width:11px;height:11px;margin-left:auto;background:repeating-linear-gradient(135deg,transparent 0 2px,#888 2px 3px)}
+
+  /* sheet */
+  .sheet{position:absolute;left:50%;top:74px;width:560px;transform:translate(-50%,-100%);visibility:hidden;transition:transform .35s cubic-bezier(.2,.8,.3,1),visibility 0s .35s;background:repeating-linear-gradient(#ececec 0 2px,#f6f6f6 2px 4px);
+    border:1px solid #777;border-top:none;border-radius:0 0 6px 6px;box-shadow:0 14px 34px rgba(0,0,0,.45);padding:14px 16px 12px;z-index:20}
+  .sheet.on{transform:translate(-50%,0);visibility:visible;transition:transform .35s cubic-bezier(.2,.8,.3,1)}
+  .sheet h2{margin:0 0 4px;font:bold 13px var(--ui)}
+  .sheet p{margin:0 0 10px;color:#555}
+  .tbl{background:#fff;border:1px solid #8e8e8e;max-height:230px;overflow:auto}
+  .tr{display:grid;grid-template-columns:54px 70px 1fr 1fr 1fr;align-items:center;gap:8px;padding:3px 8px;font-size:11px}
+  .tr:nth-child(even){background:#edf3fe}
+  .tr.h{background:linear-gradient(#fbfbfb,#e3e3e3);border-bottom:1px solid #aaa;font-weight:bold;position:sticky;top:0}
+  .tr b{font:bold 11px Monaco,Menlo,monospace}
+  .tr input{width:100%}
+  .sheetbtns{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+
+  /* other pages */
+  .plain{flex:1;display:flex;flex-direction:column;gap:12px}
+  .field{background:#fff;border:1px solid #8e8e8e;box-shadow:inset 0 1px 2px rgba(0,0,0,.25);padding:6px 8px;font:14px var(--ui)}
+  .notes{flex:1;background:#fff;border:1px solid #8e8e8e;position:relative;overflow:hidden;background-image:repeating-linear-gradient(#fff 0 17px,#eef2f8 17px 18px)}
+  .n{position:absolute;height:15px;border-radius:3px;background:linear-gradient(#9fd0ff,#3d8ee9);border:1px solid #2566b4;color:#001a3a;font-size:10px;padding:0 4px;line-height:14px;white-space:nowrap}
+  .dropa{flex:1;border:2px dashed #8e8e8e;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#444;background:rgba(255,255,255,.5);font-size:12px}
+</style>
+</head>
+<body>
+<div class="win">
+  <div class="tb">
+    <div class="title"><div class="lights"><i></i><i></i><i></i></div><b>New Virtual Singer — Voices</b></div>
+    <div class="tools">
+      <div class="seg" id="seg"><button data-p="lyr">Notes &amp; Lyrics</button><button data-p="aud">Sing from Audio</button><button class="on" data-p="voi">Voices</button></div>
+      <div class="sp"></div>
+      <div class="lcd" id="lcd"><b id="lcdn">Tenor</b> · size <span id="lcds">−2.0</span> st<br>vib <span id="lcdv">5.6 Hz</span> · choir <span id="lcdc">1</span></div>
+      <button class="gel white" id="acc">Accents…</button>
+      <button class="gel" id="prev">▶ Preview “la-le-li-lo-lu”</button>
+    </div>
+  </div>
+
+  <div class="content">
+    <!-- VOICES PAGE -->
+    <div class="page on" id="p-voi">
+      <div class="gal">
+        <div class="galh"><span>Show:</span><div class="search">🔍︎ All voices</div></div>
+        <div class="cards" id="cards"></div>
+        <div class="galf"><button title="New voice">+</button><button title="Duplicate">⧉</button><button title="Delete">−</button><span>21 voices · 3 of mine</span></div>
+      </div>
+
+      <div class="mid">
+        <div class="box stagebox"><h3>Singer</h3>
+          <div id="bigface"></div>
+          <div class="vname" id="bvn">Tenor</div>
+          <div class="vsub" id="bvs">Classic · solo</div>
+          <div class="vowels" id="vowels"></div>
+        </div>
+        <div class="box chart"><h3>Vowel space (formants)</h3><svg id="chart" width="228" height="190"></svg></div>
+      </div>
+
+      <div class="params">
+        <div class="box" style="grid-column:1/-1"><h3>Body</h3>
+          <div class="hs"><label>Voice size</label><input type="range" id="size" min="-12" max="12" step=".5" value="-2"><output id="sizeo">−2.0 st</output></div>
+          <div style="display:flex;justify-content:space-between;color:#777;font-size:9.5px;margin:-6px 50px 4px 84px"><span>giant</span><span>man</span><span>woman</span><span>child</span><span>chipmunk</span></div>
+          <div class="hs"><label>Brightness</label><input type="range" value="55"><output>+1.5 dB</output></div>
+        </div>
+        <div class="box" style="grid-column:1/-1"><h3>Vibrato</h3><div class="knobs" id="kVib"></div></div>
+        <div class="box"><h3>Tone</h3><div class="knobs" id="kTone"></div></div>
+        <div class="box"><h3>Humanize</h3><div class="knobs" id="kHum"></div></div>
+        <div class="box" style="grid-column:1/-1"><h3>Choir</h3>
+          <div class="choir">
+            <div class="step"><div style="display:flex;flex-direction:column"><button id="cup">▲</button><button id="cdn">▼</button></div><span class="num" id="cnum">1</span></div>
+            <div class="crowd" id="crowd"></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 14px">
+            <div class="hs" style="grid-template-columns:58px 1fr 38px"><label>Detune</label><input type="range" id="det" value="30"><output id="deto">12 ¢</output></div>
+            <div class="hs" style="grid-template-columns:58px 1fr 38px"><label>Spread</label><input type="range" value="70"><output>70%</output></div>
+            <div class="hs" style="grid-template-columns:58px 1fr 38px"><label>Looseness</label><input type="range" value="25"><output>18 ms</output></div>
+            <div class="hs" style="grid-template-columns:58px 1fr 38px"><label>Voice mix</label><input type="range" value="50"><output>50/50</output></div>
+          </div>
+          <div style="color:#777;font-size:10px;margin-top:2px">Each singer gets its own small formant, timing and vibrato offsets. Mixed choirs alternate between the gallery voices in the group.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LYRICS PAGE -->
+    <div class="page" id="p-lyr"><div class="plain">
+      <div class="box"><h3>Lyrics</h3><div class="field">the ket-tle sings at sev-en, and I hum a-long _ _</div></div>
+      <div class="box" style="flex:1;display:flex;flex-direction:column"><h3>Notes (from MIDI keyboard or DAW)</h3><div class="notes" id="nroll"></div>
+        <div style="display:flex;gap:8px;margin-top:8px"><button class="gel">● Record MIDI</button><button class="gel white">Take from DAW region</button><span class="sp"></span><span style="color:#666;align-self:center">14 syllables on 14 notes</span></div></div>
+    </div></div>
+
+    <!-- AUDIO PAGE -->
+    <div class="page" id="p-aud"><div class="plain">
+      <div class="dropa"><svg width="48" height="48" viewBox="0 0 48 48"><rect x="6" y="10" width="36" height="28" rx="4" fill="#fff" stroke="#666"/><path d="M12 24h4l3-8 4 16 4-20 4 18 3-8h4" fill="none" stroke="#3b8ee8" stroke-width="2"/></svg>
+        <b>Drop a sung recording here</b><span style="color:#666">Pitch and words are detected, then the chosen voice sings them back.</span><button class="gel">Choose File…</button></div>
+    </div></div>
+  </div>
+
+  <div class="status"><span>Engine: formant synthesis · 5 formants</span><span>|</span><span>Voice file: <b id="stf">Tenor.nvsvoice</b></span><span>|</span><span id="mod">Unmodified</span><span class="grow"></span></div>
+
+  <div class="sheet" id="sheet">
+    <h2>Accent editor — <span id="shv">Tenor</span></h2>
+    <p>How this voice pronounces each sound. Longer consonants read clearer; softer ones sound smoother and more “sung”.</p>
+    <div class="tbl" id="tbl"></div>
+    <div class="sheetbtns"><button class="gel white" id="shc">Revert</button><button class="gel" id="sho">OK</button></div>
+  </div>
+</div>
+<div class="caption">Mockup D — Voice designer, Aqua-era homage · <a href="index.html">← all mockups</a></div>
+
+<script>
+const $=id=>document.getElementById(id);
+// ---------- avatars ----------
+function face(o,s=54){
+  const {skin='#f2c7a0',hair='#5a3a22',style='short',beard,hood,glasses,kid,mouth={w:10,h:6},blush}=o;
+  const cx=27,cy=kid?30:28,r=kid?15:17;
+  let h=`<svg width="${s}" height="${s}" viewBox="0 0 54 54"><defs><radialGradient id="g${o.id}" cx=".4" cy=".35" r=".8"><stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></radialGradient></defs>`;
+  if(hood)h+=`<path d="M8 50 Q6 12 27 8 Q48 12 46 50Z" fill="${hood}"/><path d="M8 50 Q6 12 27 8 Q48 12 46 50Z" fill="url(#g${o.id})"/>`;
+  if(style==='long')h+=`<path d="M${cx-r-3} ${cy+18} Q${cx-r-4} ${cy-r-6} ${cx} ${cy-r-4} Q${cx+r+4} ${cy-r-6} ${cx+r+3} ${cy+18}Z" fill="${hair}"/>`;
+  h+=`<ellipse cx="${cx}" cy="${cy}" rx="${r}" ry="${r+1}" fill="${skin}"/>`;
+  if(style==='short'&&!hood)h+=`<path d="M${cx-r} ${cy-2} Q${cx-r} ${cy-r-5} ${cx} ${cy-r-3} Q${cx+r} ${cy-r-5} ${cx+r} ${cy-2} Q${cx+6} ${cy-r+3} ${cx-r} ${cy-2}Z" fill="${hair}"/>`;
+  if(style==='long')h+=`<path d="M${cx-r} ${cy} Q${cx-4} ${cy-r-2} ${cx+r} ${cy-4} Q${cx+r} ${cy-r-4} ${cx} ${cy-r-3} Q${cx-r} ${cy-r-2} ${cx-r} ${cy}Z" fill="${hair}"/>`;
+  if(style==='bun')h+=`<circle cx="${cx}" cy="${cy-r-3}" r="6" fill="${hair}"/><path d="M${cx-r} ${cy-2} Q${cx} ${cy-r-8} ${cx+r} ${cy-2} Q${cx} ${cy-r+2} ${cx-r} ${cy-2}Z" fill="${hair}"/>`;
+  if(style==='bald')h+=`<path d="M${cx-r} ${cy+2} Q${cx-r} ${cy-6} ${cx-r+3} ${cy-4}M${cx+r} ${cy+2} Q${cx+r} ${cy-6} ${cx+r-3} ${cy-4}" stroke="${hair}" stroke-width="3" fill="none"/>`;
+  if(style==='mohawk')h+=`<path d="M${cx-4} ${cy-r+2} L${cx-2} ${cy-r-9} L${cx+2} ${cy-r-7} L${cx+4} ${cy-r+2}Z" fill="${hair}"/>`;
+  if(beard)h+=`<path d="M${cx-r+2} ${cy+2} Q${cx} ${cy+r+12} ${cx+r-2} ${cy+2} Q${cx} ${cy+10} ${cx-r+2} ${cy+2}Z" fill="${beard}"/>`;
+  const ey=cy-2;
+  if(glasses)h+=`<rect x="${cx-12}" y="${ey-4}" width="10" height="7" rx="2" fill="#111"/><rect x="${cx+2}" y="${ey-4}" width="10" height="7" rx="2" fill="#111"/><path d="M${cx-2} ${ey-1}h4" stroke="#111" stroke-width="1.5"/>`;
+  else h+=`<ellipse cx="${cx-6}" cy="${ey}" rx="1.9" ry="2.4" fill="#222"/><ellipse cx="${cx+6}" cy="${ey}" rx="1.9" ry="2.4" fill="#222"/><circle cx="${cx-5.4}" cy="${ey-.8}" r=".7" fill="#fff"/><circle cx="${cx+6.6}" cy="${ey-.8}" r=".7" fill="#fff"/>`;
+  if(blush)h+=`<ellipse cx="${cx-10}" cy="${cy+5}" rx="3" ry="1.8" fill="#ff8a8a" opacity=".45"/><ellipse cx="${cx+10}" cy="${cy+5}" rx="3" ry="1.8" fill="#ff8a8a" opacity=".45"/>`;
+  h+=`<ellipse class="mouth" cx="${cx}" cy="${cy+8}" rx="${mouth.w/2}" ry="${mouth.h/2}" fill="#5a1d1d"/>`;
+  h+=`<ellipse cx="${cx}" cy="${cy}" rx="${r}" ry="${r+1}" fill="url(#g${o.id})"/></svg>`;
+  return h;
+}
+function group(list,s=54){ // choir avatar
+  let h=`<svg width="${s}" height="${s}" viewBox="0 0 54 54">`;
+  list.forEach((o,i)=>{const x=[-12,12,0][i],y=[-4,-4,6][i],sc=.62;
+    h+=`<g transform="translate(${27+x-27*sc},${27+y-27*sc}) scale(${sc})">`+face({...o,id:o.id+'g'+i},54).replace(/^<svg[^>]*>/,'').replace(/<\/svg>$/,'')+`</g>`;});
+  return h+'</svg>';
+}
+const V=[
+ {cat:'Classic',n:'Std Voice',id:'std',o:{skin:'#f2c7a0',hair:'#7a5230'},size:0,vib:5.4},
+ {cat:'Classic',n:'Karaoke',id:'kar',o:{skin:'#f5d0b0',hair:'#1a1a1a',style:'mohawk',blush:1},size:0,vib:6},
+ {cat:'Classic',n:'Male',id:'m',o:{skin:'#e8b58c',hair:'#3a2616'},size:-3,vib:5.2},
+ {cat:'Classic',n:'Female',id:'f',o:{skin:'#f6cfb0',hair:'#a0522d',style:'long',blush:1},size:4,vib:5.8},
+ {cat:'Classic',n:'Kid',id:'kid',o:{skin:'#ffd9b8',hair:'#e0a030',kid:1,blush:1},size:8,vib:6.2},
+ {cat:'Classic',n:'Soprano',id:'sop',o:{skin:'#f3c8a8',hair:'#2a1a12',style:'bun',blush:1},size:5,vib:6},
+ {cat:'Classic',n:'Alto',id:'alt',o:{skin:'#c98e66',hair:'#1c120c',style:'long'},size:3,vib:5.5},
+ {cat:'Classic',n:'Tenor',id:'ten',o:{skin:'#e6b089',hair:'#4a2e1a'},size:-2,vib:5.6},
+ {cat:'Classic',n:'Bass',id:'bas',o:{skin:'#d9a07a',hair:'#555',style:'bald',beard:'#444'},size:-6,vib:4.8},
+ {cat:'Classic',n:'Sopranino',id:'spn',o:{skin:'#ffe0c8',hair:'#f0c860',style:'bun',kid:1,blush:1},size:9,vib:6.6},
+ {cat:'Classic',n:'Gregorian',id:'grg',o:{skin:'#e3b692',hood:'#6b4a2b',style:'none'},size:-4,vib:0},
+ {cat:'Classic',n:'High Male',id:'hm',o:{skin:'#eab896',hair:'#b86b2a'},size:1,vib:5.9},
+ {cat:'Classic',n:'Quick Vibrato',id:'qv',o:{skin:'#f0c29c',hair:'#6b3b8a',style:'mohawk'},size:0,vib:7.8},
+ {cat:'Choirs',n:'Male Choir',id:'mc',grp:[{skin:'#e8b58c',hair:'#3a2616'},{skin:'#d9a07a',hair:'#555',style:'bald'},{skin:'#eab896',hair:'#b86b2a'}],size:-3,vib:5,ch:8},
+ {cat:'Choirs',n:'Female Choir',id:'fc',grp:[{skin:'#f6cfb0',hair:'#a0522d',style:'long'},{skin:'#c98e66',hair:'#1c120c',style:'long'},{skin:'#f3c8a8',hair:'#2a1a12',style:'bun'}],size:4,vib:5.6,ch:8},
+ {cat:'Choirs',n:'Bass Choir',id:'bc',grp:[{skin:'#d9a07a',hair:'#555',style:'bald',beard:'#444'},{skin:'#c48a64',hair:'#222',beard:'#222'},{skin:'#e3b692',hair:'#777',style:'bald',beard:'#888'}],size:-6,vib:4.6,ch:10},
+ {cat:'Choirs',n:'Gregorian Choir',id:'gc',grp:[{skin:'#e3b692',hood:'#6b4a2b'},{skin:'#d9a07a',hood:'#4e3520'},{skin:'#eab896',hood:'#7d5836'}],size:-4,vib:0,ch:12},
+ {cat:'Modern',n:'Ada',id:'ada',o:{skin:'#8d5a3b',hair:'#111',style:'bun',glasses:1},size:3,vib:5.2},
+ {cat:'Modern',n:'Otto',id:'otto',o:{skin:'#f0c8a0',hair:'#ddd',glasses:1,beard:'#ccc'},size:-4,vib:4.5},
+ {cat:'Modern',n:'Juno',id:'juno',o:{skin:'#ffd2b0',hair:'#ff5fa0',style:'long',blush:1},size:6,vib:6.4},
+];
+let cur=V.find(v=>v.n==='Tenor');
+function renderCards(){const c=$('cards');c.innerHTML='';let cat='';
+  V.forEach(v=>{if(v.cat!==cat){cat=v.cat;const g=document.createElement('div');g.className='gcat';g.textContent=cat;c.appendChild(g);}
+    const d=document.createElement('div');d.className='card'+(v===cur?' on':'');d.innerHTML=(v.grp?group(v.grp.map((o,i)=>({...o,id:v.id+i}))):face({...v.o,id:v.id}))+`<span>${v.n}</span>`;
+    d.onclick=()=>choose(v);c.appendChild(d);});}
+function choose(v){cur=v;renderCards();
+  $('bigface').innerHTML=v.grp?group(v.grp.map((o,i)=>({...o,id:'B'+v.id+i})),120):face({...v.o,id:'B'+v.id},120);
+  $('bvn').textContent=v.n;$('bvs').textContent=v.cat+(v.ch?` · ${v.ch} singers`:' · solo');
+  $('size').value=v.size;upSize();setChoir(v.ch||1);knobs.vrate.set(v.vib||0);knobs.vdepth.set(v.vib?40:0);
+  $('lcdn').textContent=v.n;$('stf').textContent=v.n.replace(/ /g,'')+'.nvsvoice';$('shv').textContent=v.n;$('mod').textContent='Unmodified';setVowel(curV);}
+
+// ---------- knobs ----------
+const knobs={};
+function knob(host,id,label,min,max,val,fmt){
+  const w=document.createElement('div');w.className='kn';
+  w.innerHTML=`<svg width="44" height="44" viewBox="0 0 44 44"><defs><radialGradient id="kg${id}" cx=".45" cy=".3" r=".75"><stop offset="0" stop-color="#fff"/><stop offset=".55" stop-color="#d9d9d9"/><stop offset="1" stop-color="#9a9a9a"/></radialGradient></defs>
+    <path d="${arc(22,22,19,-135,135)}" stroke="#bbb" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <path class="val" stroke="#3b8ee8" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <circle cx="22" cy="22" r="14" fill="url(#kg${id})" stroke="#777" stroke-width=".8"/><circle cx="22" cy="23" r="14" fill="none" stroke="rgba(0,0,0,.12)"/>
+    <line class="ind" x1="22" y1="22" x2="22" y2="11" stroke="#1f5fae" stroke-width="2.4" stroke-linecap="round"/></svg><label>${label}</label><output></output>`;
+  host.appendChild(w);const svg=w.querySelector('svg');let v=val;
+  const set=x=>{v=Math.max(min,Math.min(max,x));const a=-135+270*(v-min)/(max-min);
+    w.querySelector('.ind').setAttribute('transform',`rotate(${a} 22 22)`);w.querySelector('.val').setAttribute('d',arc(22,22,19,-135,a));w.querySelector('output').textContent=fmt(v);
+    if(id==='vrate')$('lcdv').textContent=fmt(v);};
+  svg.addEventListener('mousedown',e=>{const y0=e.clientY,v0=v;const mv=ev=>{set(v0+(y0-ev.clientY)/120*(max-min));$('mod').textContent='Modified •'};const up=()=>{removeEventListener('mousemove',mv);removeEventListener('mouseup',up)};addEventListener('mousemove',mv);addEventListener('mouseup',up);});
+  svg.addEventListener('dblclick',()=>set(val));set(val);knobs[id]={set};
+}
+function arc(cx,cy,r,a0,a1){const p=a=>[cx+r*Math.sin(a*Math.PI/180),cy-r*Math.cos(a*Math.PI/180)];const [x0,y0]=p(a0),[x1,y1]=p(a1);return `M${x0} ${y0} A${r} ${r} 0 ${a1-a0>180?1:0} 1 ${x1} ${y1}`;}
+const pct=v=>Math.round(v)+'%';
+knob($('kVib'),'vrate','Rate',0,9,5.6,v=>v.toFixed(1)+' Hz');
+knob($('kVib'),'vdepth','Depth',0,100,40,v=>Math.round(v)+' ¢');
+knob($('kVib'),'vdelay','Delay',0,800,250,v=>Math.round(v)+' ms');
+knob($('kVib'),'vramp','Ramp',0,800,300,v=>Math.round(v)+' ms');
+knob($('kTone'),'breath','Breath',0,100,22,pct);
+knob($('kTone'),'ring','Ring',0,100,55,pct);
+knob($('kTone'),'grit','Grit',0,100,8,pct);
+knob($('kHum'),'scoop','Scoop',0,100,30,pct);
+knob($('kHum'),'porta','Glide',0,300,60,v=>Math.round(v)+' ms');
+knob($('kHum'),'jit','Wobble',0,100,35,pct);
+
+// ---------- size ----------
+function upSize(){const v=+$('size').value;const s=(v>0?'+':v<0?'−':'')+Math.abs(v).toFixed(1);$('sizeo').textContent=s+' st';$('lcds').textContent=s;drawChart();}
+$('size').oninput=()=>{upSize();$('mod').textContent='Modified •'};
+
+// ---------- choir ----------
+function setChoir(n){n=Math.max(1,Math.min(16,n));$('cnum').textContent=n;$('lcdc').textContent=n;const c=$('crowd');c.innerHTML='';
+  const base=cur.grp?cur.grp:[cur.o];for(let i=0;i<n;i++){const o=base[i%base.length];const s=n>8?30:36;const el=document.createElement('span');el.innerHTML=face({...o,id:'c'+i,mouth:{w:6,h:4}},s);
+    el.firstChild.style.transform=`translateY(${(i%2)*6}px)`;c.appendChild(el.firstChild);}}
+$('cup').onclick=()=>setChoir(+$('cnum').textContent+1);$('cdn').onclick=()=>setChoir(+$('cnum').textContent-1);
+$('det').oninput=()=>$('deto').textContent=Math.round($('det').value*.4)+' ¢';
+
+// ---------- vowels / chart ----------
+const VW={a:{f1:730,f2:1090,w:12,h:10},e:{f1:530,f2:1840,w:15,h:5.5},i:{f1:280,f2:2250,w:16,h:3},o:{f1:500,f2:850,w:9,h:9},u:{f1:320,f2:870,w:6,h:5.5}};
+let curV='a',wob=0;
+Object.keys(VW).forEach(k=>{const b=document.createElement('button');b.textContent=k.toUpperCase();b.onclick=()=>setVowel(k);$('vowels').appendChild(b);});
+function setVowel(k){curV=k;document.querySelectorAll('#vowels button').forEach(b=>b.classList.toggle('on',b.textContent.toLowerCase()===k));
+  document.querySelectorAll('#bigface .mouth').forEach(m=>{m.setAttribute('rx',VW[k].w/2);m.setAttribute('ry',VW[k].h/2);m.style.transition='all .15s'});drawChart();}
+function drawChart(){const s=$('chart');const W=228,H=190,L=26,T=10,R=8,B=24;const f=Math.pow(2,(+$('size').value)/12*.6);
+  const X=f2=>L+(1-(Math.log(f2)-Math.log(600))/(Math.log(3200)-Math.log(600)))*(W-L-R);
+  const Y=f1=>T+(Math.log(f1)-Math.log(220))/(Math.log(1100)-Math.log(220))*(H-T-B);
+  let h=`<rect x="${L}" y="${T}" width="${W-L-R}" height="${H-T-B}" fill="#fff" stroke="#999"/>`;
+  [800,1200,2000,3000].forEach(v=>h+=`<line x1="${X(v)}" x2="${X(v)}" y1="${T}" y2="${H-B}" stroke="#e5e5e5"/><text x="${X(v)}" y="${H-B+11}" font-size="8.5" text-anchor="middle" fill="#777">${v>=1000?v/1000+'k':v}</text>`);
+  [300,500,800].forEach(v=>h+=`<line x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}" stroke="#e5e5e5"/><text x="${L-3}" y="${Y(v)+3}" font-size="8.5" text-anchor="end" fill="#777">${v}</text>`);
+  h+=`<text x="${(W+L)/2}" y="${H-2}" font-size="9" text-anchor="middle" fill="#555">F2 (Hz) ← front · back →</text><text x="8" y="${(H)/2}" font-size="9" fill="#555" transform="rotate(-90 8 ${H/2})" text-anchor="middle">F1 (Hz)</text>`;
+  const keys=Object.keys(VW);const pts=keys.map(k=>[X(VW[k].f2*f),Y(VW[k].f1*f)]);
+  // default (grey) + shifted (blue) polygons
+  const base=keys.map(k=>[X(VW[k].f2),Y(VW[k].f1)]);
+  h+=`<polygon points="${[0,1,2,4,3].map(i=>base[i].join(',')).join(' ')}" fill="none" stroke="#bbb" stroke-dasharray="3 2"/>`;
+  h+=`<polygon points="${[0,1,2,4,3].map(i=>pts[i].join(',')).join(' ')}" fill="rgba(59,142,232,.12)" stroke="#3b8ee8"/>`;
+  keys.forEach((k,i)=>{const [x,y]=pts[i];const on=k===curV;const dx=on?Math.sin(wob)*3:0;
+    h+=`<circle cx="${x+dx}" cy="${y}" r="${on?7:4.5}" fill="${on?'url(#dotg)':'#fff'}" stroke="${on?'#1f5fae':'#3b8ee8'}" stroke-width="1.3" data-k="${k}" style="cursor:pointer"/><text x="${x+dx}" y="${y+(on?3:-7)}" font-size="${on?9:9}" font-weight="bold" text-anchor="middle" fill="${on?'#fff':'#1f5fae'}" pointer-events="none">${k}</text>`;});
+  s.innerHTML=`<defs><radialGradient id="dotg" cx=".4" cy=".3"><stop offset="0" stop-color="#cfe5ff"/><stop offset="1" stop-color="#2f84e3"/></radialGradient></defs>`+h;
+  s.querySelectorAll('circle[data-k]').forEach(c=>c.onclick=()=>setVowel(c.dataset.k));
+}
+
+// ---------- preview animation ----------
+let pt=null;
+$('prev').onclick=()=>{const b=$('prev');if(pt){clearInterval(pt);pt=null;b.classList.remove('on');b.textContent='▶ Preview “la-le-li-lo-lu”';return}
+  b.classList.add('on');b.textContent='■ Stop';const seq=['a','e','i','o','u'];let k=0,t=0;
+  pt=setInterval(()=>{t++;wob=t*.9;if(t%8===0){k=(k+1)%seq.length}const m=document.querySelectorAll('#bigface .mouth');
+    if(t%8<1){m.forEach(x=>{x.setAttribute('ry',1)})}else setVowel(seq[k]);drawChart();},90);};
+
+// ---------- accent sheet ----------
+const PH=[['L','liquid',60,40,30],['M','nasal',55,50,40],['N','nasal',50,50,40],['S','fricative',45,70,20],['T','plosive',30,80,10],['K','plosive',35,75,10],['R','liquid',50,40,60],['DH','fricative',40,45,30],['HH','breath',35,30,20],['AH','vowel',100,60,50],['EH','vowel',100,60,50],['AO','vowel',100,65,55],['IY','vowel',100,55,45]];
+$('tbl').innerHTML='<div class="tr h"><span>Sound</span><span>Type</span><span>Length</span><span>Strength</span><span>Blend</span></div>'+PH.map(([p,t,a,b,c])=>`<div class="tr"><b>${p}</b><span style="color:#666">${t}</span><input type="range" value="${a}"><input type="range" value="${b}"><input type="range" value="${c}"></div>`).join('');
+$('acc').onclick=()=>$('sheet').classList.add('on');$('sho').onclick=$('shc').onclick=()=>$('sheet').classList.remove('on');
+
+// ---------- pages ----------
+document.querySelectorAll('#seg button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#seg button').forEach(x=>x.classList.toggle('on',x===b));document.querySelectorAll('.page').forEach(p=>p.classList.toggle('on',p.id==='p-'+b.dataset.p));
+  document.querySelector('.title b').textContent='New Virtual Singer — '+b.textContent;});
+(()=>{const r=$('nroll');const N=[[67,0,.5,'the'],[72,.5,.75,'ket-'],[71,1.25,.25,'tle'],[69,1.5,1,'sings'],[67,2.5,.5,'at'],[76,3,.75,'sev-'],[74,3.75,.25,'en'],[72,4,.5,'and'],[74,4.5,.5,'I'],[76,5,.5,'hum'],[74,5.5,.5,'a-'],[72,6,1,'long'],[71,7,.5,'—'],[72,7.5,1.25,'—']];
+  N.forEach(([p,s,d,t])=>{const e=document.createElement('div');e.className='n';e.style.left=10+s*90+'px';e.style.width=d*90-2+'px';e.style.top=(80-p)*18+2+'px';e.textContent=t;r.appendChild(e);});})();
+
+renderCards();choose(cur);setVowel('a');
+</script>
+</body>
+</html>

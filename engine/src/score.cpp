@@ -1,5 +1,6 @@
 #include "score.hpp"
 
+#include <cstdlib>
 #include <algorithm>
 #include <cctype>
 #include <sstream>

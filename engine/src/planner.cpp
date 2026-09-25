@@ -1,5 +1,6 @@
 #include "planner.hpp"
 
+#include <string>
 #include <algorithm>
 #include <cmath>
 #include <set>

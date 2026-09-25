@@ -4,3 +4,5 @@ tools/.venv/
 __pycache__/
 .DS_Store
 reference/
+build-wasm/
+web/nvs/

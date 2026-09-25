@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>New Virtual Singer</title>
+<meta name="description" content="A formant singing synthesizer in your browser. Type lyrics, pick a melody and a voice, press Sing.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%233b8ee8'/%3E%3Cellipse cx='16' cy='21' rx='5' ry='4' fill='%23fff'/%3E%3Ccircle cx='11' cy='12' r='2' fill='%23fff'/%3E%3Ccircle cx='21' cy='12' r='2' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="desk">
+  <header class="hero">
+    <h1>New Virtual Singer</h1>
+    <p>A formant singing synthesizer, running entirely in your browser. Type some words, pick a tune and a voice, and press <b>Sing</b>.</p>
+  </header>
+
+  <div class="win" id="win">
+    <div class="titlebar">
+      <div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>
+      <b>New Virtual Singer</b>
+    </div>
+
+    <div class="toolbar">
+      <div class="transport">
+        <button class="gel sing" id="sing" disabled><span class="ico">&#9654;</span> Sing</button>
+        <button class="gel white" id="stop" disabled><span class="ico">&#9632;</span> Stop</button>
+      </div>
+      <div class="lcd" id="lcd" aria-live="polite">
+        <div class="lcd-row"><b id="lcdState">LOADING ENGINE…</b><span id="lcdTime">0:00.0</span></div>
+        <div class="lcd-row sub"><span id="lcdLine">warming up the vocal cords</span></div>
+      </div>
+      <div class="filebtns">
+        <button class="gel white" id="download" disabled>&#8595; Download WAV</button>
+        <label class="gel white" id="openLbl" tabindex="0">Open MIDI / MusicXML…<input type="file" id="file" accept=".mid,.midi,.xml,.musicxml,audio/midi" hidden></label>
+      </div>
+    </div>
+
+    <div class="content">
+      <section class="box rollbox">
+        <h3>Piano Roll</h3>
+        <div class="roll" id="roll">
+          <canvas id="keys" class="keys" aria-hidden="true"></canvas>
+          <div class="rollscroll" id="rollscroll"><canvas id="grid" aria-label="Piano roll of the melody with sung syllables"></canvas></div>
+        </div>
+        <div class="rollinfo">
+          <span id="noteInfo" class="noteinfo">Hover or tap a note to see its phonemes.</span>
+          <span id="warn" class="warn" hidden></span>
+        </div>
+      </section>
+
+      <div class="cols">
+        <div class="col">
+          <section class="box">
+            <h3>Lyrics</h3>
+            <textarea id="lyrics" rows="3" spellcheck="false" aria-label="Lyrics"></textarea>
+            <p class="hint">Words flow onto the notes. Longer words take one note per syllable. <code>hel-lo</code> splits a word, <code>_</code> holds a vowel over the next note, and leftover notes are hummed.</p>
+          </section>
+
+          <section class="box">
+            <h3>Melody</h3>
+            <div class="row">
+              <label for="song">Tune</label>
+              <select id="song" class="popup"></select>
+              <label for="tempo">Tempo</label>
+              <input id="tempo" type="number" min="30" max="300" step="1" class="field num" aria-label="Tempo in beats per minute">
+            </div>
+            <textarea id="notes" rows="6" spellcheck="false" class="mono" aria-label="Notes"></textarea>
+            <p class="hint">Each note is <code>PITCH BEATS</code>, like <code>C4 1</code> or <code>F#4 0.5</code>; <code>r 1</code> is a rest. Separate with commas or new lines. You can also drop a <b>.mid</b> or <b>.musicxml</b> file anywhere on the window.</p>
+          </section>
+        </div>
+
+        <div class="col">
+          <section class="box voicebox">
+            <h3>Voice</h3>
+            <div class="singer">
+              <div class="bigface" id="bigface"></div>
+              <div>
+                <div class="vname" id="vname">Std Voice</div>
+                <div class="vsub" id="vsub"></div>
+              </div>
+            </div>
+            <div class="gallery" id="gallery" role="radiogroup" aria-label="Voice preset"></div>
+          </section>
+
+          <section class="box">
+            <h3>Tweak</h3>
+            <div id="sliders"></div>
+            <div class="tweakfoot"><span id="modified">Preset settings</span><button class="gel white small" id="reset">Reset</button></div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <div class="status">
+      <span id="engineStatus">Engine: loading…</span>
+      <span class="sep">|</span>
+      <span id="counts"></span>
+      <span class="grow" aria-hidden="true"></span>
+    </div>
+
+    <div class="dropveil" id="dropveil"><div>Drop a MIDI or MusicXML file to sing it</div></div>
+  </div>
+
+  <footer class="caption">Formant synthesis in the spirit of the classic desktop singers. The engine is C++ compiled to WebAssembly; nothing is uploaded anywhere.</footer>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>

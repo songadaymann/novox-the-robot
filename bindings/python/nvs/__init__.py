@@ -1,7 +1,7 @@
 """Python bindings for the New Virtual Singer engine (ctypes over libnvs).
 
     import nvs
-    singer = nvs.Singer()                       # finds build/libnvs.dylib and the dictionary
+    singer = nvs.Singer()
     audio = singer.render({"tempo": 100, "lyrics": "hel-lo", "notes": ["C4 1", "E4 1"]})
     singer.save_wav("hello.wav", audio)
 
@@ -17,13 +17,17 @@ import struct
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parents[2]  # repository root when running from a source checkout
 _LIB_NAMES = {"darwin": "libnvs.dylib", "win32": "nvs.dll"}
+
+__version__ = "0.1.0"
 
 
 def _find_library() -> Path:
     name = _LIB_NAMES.get(sys.platform, "libnvs.so")
-    for candidate in (os.environ.get("NVS_LIB"), ROOT / "build" / name):
+    # Installed wheel: next to this file. Source checkout: build/. Override: $NVS_LIB.
+    for candidate in (os.environ.get("NVS_LIB"), HERE / name, ROOT / "build" / name):
         if candidate and Path(candidate).exists():
             return Path(candidate)
     raise FileNotFoundError(f"{name} not found; build the engine first (cmake --build build)")
@@ -135,13 +139,17 @@ class Singer:
         return self._take_string(self._lib.nvs_voice_names()).split(",")
 
     def save_wav(self, path, samples) -> None:
+        """Write mono 16-bit PCM at this singer's sample rate."""
+        import array
+        pcm = array.array("h", (int(max(-1.0, min(1.0, float(s))) * 32767) for s in samples))
+        if sys.byteorder == "big":
+            pcm.byteswap()
+        data = pcm.tobytes()
+        rate = int(self.sample_rate)
         with open(path, "wb") as f:
-            data = b"".join(struct.pack("<h", int(max(-1.0, min(1.0, float(s))) * 32767)) for s in samples)
-            rate = int(self.sample_rate)
             f.write(b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVE")
             f.write(b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * 2, 2, 16))
             f.write(b"data" + struct.pack("<I", len(data)) + data)
-
 
 class Stream:
     """Real-time style rendering of one score. Create with Singer.stream(score)."""

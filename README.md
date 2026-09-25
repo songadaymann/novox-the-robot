@@ -73,7 +73,8 @@ chunk = stream.process(512)                                      # next 512 samp
 
 `nvs_stream_create` / `nvs_stream_process` render a score incrementally: any chunk size, any
 start position (`nvs_stream_seek`), no allocation in `process`, and output identical to an offline
-render. Output is at a fixed level (peaks around −5 dBFS) with a soft clip. Onset consonants start
+render. Output is at a fixed level with a soft clip, and each voice is loudness-matched to the
+std voice (averaged over vowels and pitches), so presets sit within a few dB of each other. Onset consonants start
 before the beat, so audio begins `nvs_stream_lead()` seconds before score time 0.
 
 ## Layout

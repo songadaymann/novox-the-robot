@@ -1,0 +1,76 @@
+# Builds release artifacts when a version tag (v*) is pushed:
+#   - nvs CLI binaries (macOS universal, Linux x86_64, Windows x86_64) attached to the GitHub release
+#   - Python wheels + sdist, published to PyPI (configure PyPI trusted publishing for this repo)
+#   - npm package with the WebAssembly engine (needs an NPM_TOKEN repository secret)
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+  id-token: write
+jobs:
+  cli:
+    strategy:
+      matrix:
+        include:
+          - { os: macos-latest, name: macos-universal, flags: "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0", exe: nvs }
+          - { os: ubuntu-latest, name: linux-x86_64, flags: "", exe: nvs }
+          - { os: windows-latest, name: windows-x86_64, flags: "", exe: Release/nvs.exe }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNVS_BUILD_TESTS=OFF ${{ matrix.flags }}
+      - run: cmake --build build --config Release -j 4 --target nvs
+      - shell: bash
+        run: |
+          mkdir dist && cp build/${{ matrix.exe }} dist/ && cp LICENSE README.md dist/
+          cd dist && tar czf ../nvs-${{ github.ref_name }}-${{ matrix.name }}.tar.gz *
+      - uses: softprops/action-gh-release@v2
+        with: { files: "nvs-*.tar.gz" }
+
+  wheels:
+    strategy:
+      matrix:
+        os: [macos-latest, macos-13, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pypa/cibuildwheel@v2.21
+        env:
+          CIBW_BUILD: "cp312-*"          # py3-none wheels: one build per platform is enough
+          CIBW_SKIP: "*-musllinux* *-win32 *_i686"
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+      - uses: actions/upload-artifact@v4
+        with: { name: "wheels-${{ matrix.os }}", path: wheelhouse/*.whl }
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pipx run build --sdist
+      - uses: actions/upload-artifact@v4
+        with: { name: sdist, path: dist/*.tar.gz }
+
+  pypi:
+    needs: [wheels, sdist]
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  npm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mymindstorm/setup-emsdk@v14
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", registry-url: "https://registry.npmjs.org" }
+      - run: ./scripts/build-wasm.sh
+      - run: npm publish --access public
+        working-directory: bindings/js
+        env: { NODE_AUTH_TOKEN: "${{ secrets.NPM_TOKEN }}" }

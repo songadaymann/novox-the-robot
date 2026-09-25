@@ -6,6 +6,7 @@
 //   nvs phonemes "some words"
 //   nvs voices
 
+#include <cstdlib>
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>

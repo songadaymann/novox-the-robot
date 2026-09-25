@@ -43,7 +43,11 @@ endif()
 add_library(nvs_objects OBJECT ${NVS_SOURCES})
 target_include_directories(nvs_objects PUBLIC engine/include PRIVATE engine/src)
 set_target_properties(nvs_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
-target_compile_options(nvs_objects PRIVATE -Wall -Wextra)
+if(MSVC)
+  target_compile_options(nvs_objects PRIVATE /W3 /utf-8 /bigobj)
+else()
+  target_compile_options(nvs_objects PRIVATE -Wall -Wextra)
+endif()
 
 # Static library: linked into the CLI, tests and (later) the plugin.
 add_library(nvs_static STATIC $<TARGET_OBJECTS:nvs_objects>)
@@ -55,13 +59,43 @@ add_library(nvs_shared SHARED $<TARGET_OBJECTS:nvs_objects>)
 target_include_directories(nvs_shared PUBLIC engine/include)
 set_target_properties(nvs_shared PROPERTIES OUTPUT_NAME nvs)
 
-add_executable(nvs engine/cli/main.cpp)
-target_link_libraries(nvs PRIVATE nvs_static)
+option(NVS_BUILD_CLI "Build the nvs command-line tool" ON)
+option(NVS_BUILD_TESTS "Build the engine tests" ON)
+
+if(NVS_BUILD_CLI)
+  add_executable(nvs engine/cli/main.cpp)
+  target_link_libraries(nvs PRIVATE nvs_static)
+  install(TARGETS nvs RUNTIME DESTINATION bin COMPONENT cli)
+endif()
+
+# Python wheels (scikit-build-core) ship the shared library inside the package.
+if(SKBUILD)
+  install(TARGETS nvs_shared LIBRARY DESTINATION nvs COMPONENT python RUNTIME DESTINATION nvs COMPONENT python)
+endif()
 
 # Tests: `ctest --test-dir build` (or run build/nvs_tests).
-enable_testing()
-add_executable(nvs_tests tests/engine_tests.cpp)
-target_link_libraries(nvs_tests PRIVATE nvs_static)
-target_include_directories(nvs_tests PRIVATE engine/src)
-target_compile_definitions(nvs_tests PRIVATE NVS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-add_test(NAME engine COMMAND nvs_tests)
+if(NVS_BUILD_TESTS)
+  enable_testing()
+  add_executable(nvs_tests tests/engine_tests.cpp)
+  target_link_libraries(nvs_tests PRIVATE nvs_static)
+  target_include_directories(nvs_tests PRIVATE engine/src)
+  target_compile_definitions(nvs_tests PRIVATE NVS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+  add_test(NAME engine COMMAND nvs_tests)
+endif()
+
+# WebAssembly module for the JavaScript package (emcmake cmake -B build-wasm ...).
+if(EMSCRIPTEN)
+  set(NVS_WASM_EXPORTS "_nvs_create,_nvs_destroy,_nvs_load_dictionary,_nvs_add_word,_nvs_render,_nvs_plan,_nvs_import,_nvs_phonemize,_nvs_voice_names,_nvs_stream_create,_nvs_stream_destroy,_nvs_stream_length,_nvs_stream_position,_nvs_stream_lead,_nvs_stream_seek,_nvs_stream_process,_nvs_last_error,_nvs_free,_malloc,_free")
+  add_executable(nvs_wasm $<TARGET_OBJECTS:nvs_objects>)
+  set_target_properties(nvs_wasm PROPERTIES OUTPUT_NAME nvs_wasm SUFFIX ".js")
+  target_link_options(nvs_wasm PRIVATE
+    -O3
+    -sMODULARIZE=1 -sEXPORT_ES6=1 -sEXPORT_NAME=createNvsModule
+    -sENVIRONMENT=web,worker,node
+    -sALLOW_MEMORY_GROWTH=1
+    -sEXPORTED_FUNCTIONS=[${NVS_WASM_EXPORTS}]
+    -sEXPORTED_RUNTIME_METHODS=[UTF8ToString,stringToNewUTF8,HEAPF32,HEAPU8,HEAPU32]
+    -sDISABLE_EXCEPTION_CATCHING=0)
+  target_compile_options(nvs_objects PRIVATE -fexceptions)
+  target_link_options(nvs_wasm PRIVATE -fexceptions)
+endif()

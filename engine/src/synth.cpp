@@ -1,5 +1,8 @@
 #include "synth.hpp"
 
+#include "phonemes.hpp"
+
+#include <cstddef>
 #include <algorithm>
 #include <cmath>
 #include <memory>
@@ -396,8 +399,47 @@ class VoiceRenderer {
 
 }  // namespace
 
-// Output level before any normalization: typical voices peak around -6 dBFS.
-constexpr float kOutputGain = 0.3f;
+// Output level before any normalization: voices peak around -3..-9 dBFS.
+constexpr float kOutputGain = 0.24f;
+
+// Average loudness of a voice across vowels and pitches, so every preset
+// streams at a similar level. Measured once per stream (a few ms of audio).
+float voiceLoudness(const Voice& voice, double sr) {
+  static const char* kVowels[] = {"AA", "IY", "UW", "EH", "OW"};
+  static const float kPitches[] = {50, 57, 64, 69};
+  Voice mono = voice;
+  mono.choirSize = 1;
+  mono.vibratoDepth = 0;
+  const double len = 0.2;
+  std::vector<float> buf(static_cast<size_t>(len * sr));
+  double power = 0;
+  int count = 0;
+  for (const char* v : kVowels) {
+    for (float midi : kPitches) {
+      Plan plan;
+      Segment seg;
+      seg.kind = SegKind::Vowel;
+      seg.label = v;
+      seg.end = len;
+      seg.p = findPhoneme(v)->target;
+      plan.segments.push_back(seg);
+      PitchNote note;
+      note.end = len;
+      note.midi = midi;
+      plan.notes.push_back(note);
+      plan.length = len;
+      VoiceRenderer r(plan, mono, sr, 1, 0.0f, 0.0);
+      std::fill(buf.begin(), buf.end(), 0.0f);
+      r.process(buf.data(), buf.size());
+      double sum = 0;
+      size_t from = buf.size() / 2;
+      for (size_t i = from; i < buf.size(); ++i) sum += static_cast<double>(buf[i]) * buf[i];
+      power += sum / static_cast<double>(buf.size() - from);
+      ++count;
+    }
+  }
+  return static_cast<float>(std::sqrt(power / count));
+}
 
 struct Stream::Impl {
   Plan plan;
@@ -407,6 +449,7 @@ struct Stream::Impl {
   size_t length = 0;
   size_t pos = 0;
   float gain = 1.0f;
+  float levelMatch = 1.0f;
   std::vector<std::unique_ptr<VoiceRenderer>> members;
 
   void build(size_t start) {
@@ -419,7 +462,7 @@ struct Stream::Impl {
       members.push_back(std::make_unique<VoiceRenderer>(plan, voice, sr, seed + static_cast<uint32_t>(m) * 101u,
                                                         detune, delay, start));
     }
-    gain = kOutputGain / std::sqrt(static_cast<float>(count));
+    gain = kOutputGain * levelMatch / std::sqrt(static_cast<float>(count));
     pos = start;
   }
 };
@@ -431,6 +474,9 @@ Stream::Stream(Plan plan, Voice voice, double sampleRate, uint32_t seed) : impl_
   impl_->seed = seed;
   double extra = impl_->voice.choirSize > 1 ? impl_->voice.choirSpread : 0.0;
   impl_->length = static_cast<size_t>((impl_->plan.length + extra) * sampleRate);
+  static const float reference = voiceLoudness(Voice{}, 48000);  // std voice
+  float ours = voiceLoudness(impl_->voice, sampleRate);
+  if (ours > 1e-9f) impl_->levelMatch = std::clamp(reference / ours, 0.25f, 4.0f);
   impl_->build(0);
 }
 

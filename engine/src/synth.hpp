@@ -14,7 +14,7 @@
 #include "planner.hpp"
 #include "voice.hpp"
 
-namespace nvs {
+namespace novox {
 
 struct RenderOptions {
   double sampleRate = 48000;
@@ -49,4 +49,4 @@ class Stream {
   std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace nvs
+}  // namespace novox

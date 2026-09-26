@@ -130,13 +130,13 @@ Findings:
 - [ ] Tuning pass driven by the Whisper harness (per-phoneme targets, consonant timing, high voices)
 - [ ] Coarticulation: nasalized vowels next to nasals, vowel-dependent consonant loci
 - [ ] Dynamics: note velocity → loudness/brightness, phrase-end decay, crescendo on long notes
-- [x] Streaming API (`nvs_stream_*`): chunked, seekable, allocation-free, bit-identical to offline;
+- [x] Streaming API (`novox_stream_*`): chunked, seekable, allocation-free, bit-identical to offline;
       per-voice loudness matching
 - [ ] Live-MIDI mode: `note_on(pitch, velocity, syllable)` with a small lookahead (reported as latency)
 - [x] WebAssembly build + ES module wrapper + TypeScript types + `npx` CLI (`bindings/js`, `scripts/build-wasm.sh`)
 - [x] CMU dictionary compiled into the engine
 - [x] MIDI (lyric events) and MusicXML import; MusicXML export (`tools/to_musicxml.py`)
-- [x] Engine tests (`ctest`), Python wheel (`pip install .` → `nvs` command), CI + release workflows
+- [x] Engine tests (`ctest`), Python wheel (`pip install .` → `novox` command), CI + release workflows
 - [ ] Publish (needs the final name, a GitHub repo, PyPI + npm accounts)
 - [ ] More languages (the original sang French, Italian, Latin…)
 

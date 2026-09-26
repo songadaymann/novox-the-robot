@@ -6,7 +6,7 @@
 #include <set>
 #include <sstream>
 
-namespace nvs {
+namespace novox {
 
 namespace {
 
@@ -592,4 +592,4 @@ std::string planToJson(const Plan& plan) {
   return o.str();
 }
 
-}  // namespace nvs
+}  // namespace novox

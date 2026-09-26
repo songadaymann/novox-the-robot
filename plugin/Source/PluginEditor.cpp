@@ -18,7 +18,7 @@ using Args = juce::Array<juce::var>;
 
 }  // namespace
 
-std::optional<juce::WebBrowserComponent::Resource> NvsEditor::getResource(const juce::String& url) {
+std::optional<juce::WebBrowserComponent::Resource> NovoxEditor::getResource(const juce::String& url) {
   juce::String path = url.fromFirstOccurrenceOf("/", false, false);
   if (path.isEmpty() || path == "/") path = "index.html";
   path = path.upToFirstOccurrenceOf("?", false, false).fromLastOccurrenceOf("/", false, false);
@@ -34,12 +34,12 @@ std::optional<juce::WebBrowserComponent::Resource> NvsEditor::getResource(const 
   return std::nullopt;
 }
 
-juce::WebBrowserComponent::Options NvsEditor::makeOptions() {
+juce::WebBrowserComponent::Options NovoxEditor::makeOptions() {
   auto& p = proc_;
   return juce::WebBrowserComponent::Options{}
       .withBackend(juce::WebBrowserComponent::Options::Backend::webview2)
       .withWinWebView2Options(juce::WebBrowserComponent::Options::WinWebView2{}.withUserDataFolder(
-          juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("NewVirtualSinger")))
+          juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("NovoxTheRobot")))
       .withNativeIntegrationEnabled()
       .withResourceProvider([](const juce::String& url) { return getResource(url); })
       .withNativeFunction("getSong", [&p](const Args&, Completion done) { done(p.getSongJson()); })
@@ -83,7 +83,7 @@ juce::WebBrowserComponent::Options NvsEditor::makeOptions() {
       });
 }
 
-NvsEditor::NvsEditor(NvsProcessor& p) : juce::AudioProcessorEditor(p), proc_(p), browser_(makeOptions()) {
+NovoxEditor::NovoxEditor(NovoxProcessor& p) : juce::AudioProcessorEditor(p), proc_(p), browser_(makeOptions()) {
   addAndMakeVisible(browser_);
   browser_.goToURL(juce::WebBrowserComponent::getResourceProviderRoot());
   setResizable(true, true);
@@ -92,13 +92,13 @@ NvsEditor::NvsEditor(NvsProcessor& p) : juce::AudioProcessorEditor(p), proc_(p),
   startTimerHz(30);
 }
 
-NvsEditor::~NvsEditor() { stopTimer(); }
+NovoxEditor::~NovoxEditor() { stopTimer(); }
 
-void NvsEditor::paint(juce::Graphics& g) { g.fillAll(juce::Colour(0xffe8e8e8)); }
+void NovoxEditor::paint(juce::Graphics& g) { g.fillAll(juce::Colour(0xffe8e8e8)); }
 
-void NvsEditor::resized() { browser_.setBounds(getLocalBounds()); }
+void NovoxEditor::resized() { browser_.setBounds(getLocalBounds()); }
 
-void NvsEditor::timerCallback() {
+void NovoxEditor::timerCallback() {
   const auto s = proc_.getStatus();
   auto* o = new juce::DynamicObject();
   o->setProperty("beats", s.beats);

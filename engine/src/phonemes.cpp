@@ -2,7 +2,7 @@
 
 #include <unordered_map>
 
-namespace nvs {
+namespace novox {
 
 namespace {
 
@@ -233,4 +233,4 @@ Params silenceLike(const Params& p) {
   return s;
 }
 
-}  // namespace nvs
+}  // namespace novox

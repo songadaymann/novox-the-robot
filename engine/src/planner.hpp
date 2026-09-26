@@ -10,7 +10,7 @@
 #include "phonemes.hpp"
 #include "score.hpp"
 
-namespace nvs {
+namespace novox {
 
 enum class SegKind { Silence, Vowel, Offglide, Closure, Burst, Aspiration, Consonant };
 
@@ -51,4 +51,4 @@ Plan planScore(const Score& score, const Lexicon& lexicon);
 // JSON dump of a plan (segments, syllables, warnings) for inspection.
 std::string planToJson(const Plan& plan);
 
-}  // namespace nvs
+}  // namespace novox

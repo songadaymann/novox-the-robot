@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// npx new-virtual-singer say "hello world" -o hello.wav --voice robot --pitch D3
-// npx new-virtual-singer render song.mid --lyrics "..." -o song.wav
+// npx novox say "hello world" -o hello.wav --voice robot --pitch D3
+// npx novox render song.mid --lyrics "..." -o song.wav
 import { readFileSync, writeFileSync } from "node:fs";
 import { createSinger } from "../index.js";
 
@@ -44,7 +44,7 @@ if (cmd === "voices") {
     process.exit(0);
   }
 } else {
-  console.error("usage: nvs say|render|import|phonemes|voices ... [-o out.wav] [--voice NAME]");
+  console.error("usage: novox say|render|import|phonemes|voices ... [-o out.wav] [--voice NAME]");
   process.exit(1);
 }
 if (voice) score.voice = voice;

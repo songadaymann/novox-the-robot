@@ -1,5 +1,5 @@
 {
-  "name": "new-virtual-singer",
+  "name": "novox",
   "version": "0.1.0",
   "description": "Formant singing synthesizer (WebAssembly): type lyrics, give it a melody, it sings",
   "type": "module",
@@ -8,8 +8,8 @@
   "exports": {
     ".": { "types": "./index.d.ts", "default": "./index.js" }
   },
-  "bin": { "nvs": "bin/nvs.js" },
-  "files": ["index.js", "index.d.ts", "nvs_wasm.js", "nvs_wasm.wasm", "bin/", "README.md", "LICENSE"],
+  "bin": { "novox": "bin/novox.js" },
+  "files": ["index.js", "index.d.ts", "novox_wasm.js", "novox_wasm.wasm", "bin/", "README.md", "LICENSE"],
   "keywords": ["singing", "speech synthesis", "formant", "webassembly", "music", "vocaloid"],
   "license": "MIT",
   "author": "Jonathan Mann"

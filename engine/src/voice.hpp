@@ -8,7 +8,7 @@
 
 #include "json.hpp"
 
-namespace nvs {
+namespace novox {
 
 struct Voice {
   std::string name = "std";
@@ -68,4 +68,4 @@ bool voicePreset(const std::string& name, Voice& out);
 // with "preset".
 void applyVoiceJson(const json::Value& obj, Voice& v);
 
-}  // namespace nvs
+}  // namespace novox

@@ -17,7 +17,7 @@ export interface Plan {
   warnings: string[];
 }
 
-export class NvsError extends Error {}
+export class NovoxError extends Error {}
 
 export class Stream {
   readonly length: number;

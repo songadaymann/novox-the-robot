@@ -6,7 +6,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace nvs {
+namespace novox {
 
 struct PhonToken {
   std::string symbol;  // ARPAbet without stress, schwa mapped to "AX"
@@ -52,4 +52,4 @@ Pronunciation guessPronunciation(const std::string& word);
 
 bool isVowelSymbol(const std::string& symbol);
 
-}  // namespace nvs
+}  // namespace novox

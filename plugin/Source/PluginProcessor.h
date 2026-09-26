@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "Song.h"
-#include "nvs.h"
+#include "novox.h"
 
 // Shares one engine (and its ~126k-word dictionary) across every plugin instance.
 class SharedEngine {
@@ -27,13 +27,13 @@ class SharedEngine {
  private:
   SharedEngine();
   std::mutex mutex_;
-  nvs_engine* engine_ = nullptr;
+  novox_engine* engine_ = nullptr;
 };
 
-class NvsProcessor : public juce::AudioProcessor, private juce::Timer {
+class NovoxProcessor : public juce::AudioProcessor, private juce::Timer {
  public:
-  NvsProcessor();
-  ~NvsProcessor() override;
+  NovoxProcessor();
+  ~NovoxProcessor() override;
 
   // AudioProcessor
   void prepareToPlay(double sampleRate, int samplesPerBlock) override;
@@ -130,5 +130,5 @@ class NvsProcessor : public juce::AudioProcessor, private juce::Timer {
   juce::AbstractFifo captureFifo_{512};
   std::array<Captured, 512> captureBuf_{};
 
-  JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NvsProcessor)
+  JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NovoxProcessor)
 };

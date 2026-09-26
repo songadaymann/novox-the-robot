@@ -5,5 +5,5 @@ __pycache__/
 .DS_Store
 reference/
 build-wasm/
-web/nvs/
+web/novox/
 build-plugin/

@@ -6,7 +6,7 @@
 #include <sstream>
 #include <stdexcept>
 
-namespace nvs {
+namespace novox {
 
 bool parsePitch(const std::string& text, float& midi) {
   if (text.empty()) return false;
@@ -150,4 +150,4 @@ Score parseScore(const json::Value& root) {
   return score;
 }
 
-}  // namespace nvs
+}  // namespace novox

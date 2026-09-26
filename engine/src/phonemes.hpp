@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace nvs {
+namespace novox {
 
 // Indices into a Params vector. Everything the synthesizer interpolates
 // between phoneme targets lives here so transitions are one loop.
@@ -53,4 +53,4 @@ const std::vector<Phoneme>& allPhonemes();
 // silence don't sweep the formants.
 Params silenceLike(const Params& p);
 
-}  // namespace nvs
+}  // namespace novox

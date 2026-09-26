@@ -9,7 +9,7 @@
 #include <sstream>
 #include <stdexcept>
 
-namespace nvs {
+namespace novox {
 
 namespace {
 
@@ -646,4 +646,4 @@ std::string scoreToJson(const Score& score) {
   return o.str();
 }
 
-}  // namespace nvs
+}  // namespace novox

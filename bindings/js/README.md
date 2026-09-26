@@ -1,10 +1,10 @@
-# new-virtual-singer
+# novox
 
 A formant singing synthesizer in WebAssembly: give it lyrics and a melody and it sings, in the
 robotic-charming spirit of Myriad's classic Virtual Singer. Works in browsers, workers and Node.
 
 ```js
-import { createSinger } from "new-virtual-singer";
+import { createSinger } from "novox";
 
 const singer = await createSinger({ sampleRate: 48000 });
 const audio = singer.render({
@@ -24,8 +24,8 @@ const chunk = stream.process(128);                       // e.g. inside an Audio
 Command line:
 
 ```bash
-npx new-virtual-singer say "hello world" -o hello.wav --voice robot --pitch D3
-npx new-virtual-singer render song.mid --lyrics "..." -o song.wav
+npx novox say "hello world" -o hello.wav --voice robot --pitch D3
+npx novox render song.mid --lyrics "..." -o song.wav
 ```
 
 Lyric notation: `hel-lo` splits syllables, `_` holds the previous vowel over the next note,

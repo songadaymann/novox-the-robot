@@ -228,9 +228,9 @@ def main() -> int:
         print(f"wrote {out.relative_to(ROOT)}")
         return 0
 
-    import nvs
+    import novox
 
-    singer = nvs.Singer(sample_rate=SR)
+    singer = novox.Singer(sample_rate=SR)
     voice = json.loads(args.voice_json) if args.voice_json else args.voice
     score = notes_to_score(ref["notes"], args.lyrics, voice)
     audio = singer.render(score)

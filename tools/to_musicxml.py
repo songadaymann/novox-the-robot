@@ -17,7 +17,7 @@ from xml.sax.saxutils import escape
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bindings" / "python"))
 
-import nvs  # noqa: E402
+import novox  # noqa: E402
 
 DIVISIONS = 12  # per quarter note: allows 16ths and triplet 8ths
 STEPS = [("C", 0), ("C", 1), ("D", 0), ("D", 1), ("E", 0), ("F", 0), ("F", 1), ("G", 0), ("G", 1), ("A", 0),
@@ -40,7 +40,7 @@ def pitch_xml(midi: int) -> str:
     return f"<pitch><step>{step}</step>{alt}<octave>{octave}</octave></pitch>"
 
 
-def convert(score: dict, singer: nvs.Singer) -> str:
+def convert(score: dict, singer: novox.Singer) -> str:
     tempo = float(score.get("tempo", 120))
     if score.get("units") == "seconds":
         raise SystemExit("seconds-based scores aren't supported; use beats")
@@ -149,7 +149,7 @@ def main() -> int:
     # Our scores allow // comments; strip them for Python's JSON parser.
     text = "\n".join(line for line in text.splitlines() if not line.strip().startswith("//"))
     score = json.loads(text)
-    Path(dst).write_text(convert(score, nvs.Singer()))
+    Path(dst).write_text(convert(score, novox.Singer()))
     print(dst)
     return 0
 

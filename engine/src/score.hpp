@@ -25,7 +25,7 @@
 #include "json.hpp"
 #include "voice.hpp"
 
-namespace nvs {
+namespace novox {
 
 struct Note {
   double start = 0;   // seconds
@@ -54,4 +54,4 @@ bool parsePitch(const std::string& text, float& midi);
 // ("hap-py" -> "hap-", "py"). "_" stays its own token.
 std::vector<std::string> tokenizeLyrics(const std::string& line);
 
-}  // namespace nvs
+}  // namespace novox

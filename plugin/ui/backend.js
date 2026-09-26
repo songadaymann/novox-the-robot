@@ -1,4 +1,4 @@
-// Backend bridge for the New Virtual Singer editor.
+// Backend bridge for the Novox The Robot editor.
 //
 // Inside the plugin (window.__JUCE__ exists) every call goes to a native
 // function registered with WebBrowserComponent::Options::withNativeFunction.

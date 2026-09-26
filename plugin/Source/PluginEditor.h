@@ -7,10 +7,10 @@
 // The plugin window: an HTML/JS interface (plugin/ui, compiled in) hosted in a
 // WebBrowserComponent. The page calls native functions (getSong, setSong,
 // getPlan, ...) and receives a "status" event ~30 times a second.
-class NvsEditor : public juce::AudioProcessorEditor, private juce::Timer {
+class NovoxEditor : public juce::AudioProcessorEditor, private juce::Timer {
  public:
-  explicit NvsEditor(NvsProcessor&);
-  ~NvsEditor() override;
+  explicit NovoxEditor(NovoxProcessor&);
+  ~NovoxEditor() override;
   void resized() override;
   void paint(juce::Graphics&) override;
 
@@ -19,8 +19,8 @@ class NvsEditor : public juce::AudioProcessorEditor, private juce::Timer {
   juce::WebBrowserComponent::Options makeOptions();
   static std::optional<juce::WebBrowserComponent::Resource> getResource(const juce::String& url);
 
-  NvsProcessor& proc_;
+  NovoxProcessor& proc_;
   juce::WebBrowserComponent browser_;
 
-  JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NvsEditor)
+  JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NovoxEditor)
 };

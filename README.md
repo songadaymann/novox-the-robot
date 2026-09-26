@@ -1,4 +1,4 @@
-# New Virtual Singer
+# Novox The Robot
 
 A modern take on Myriad's **Virtual Singer** (from Harmony Assistant): a formant-synthesis
 singing voice that sings any lyrics on any melody. Deliberately synthetic, deliberately
@@ -19,15 +19,15 @@ Goals:
 ```bash
 cmake -S . -B build && cmake --build build -j 8
 
-build/nvs say "hello my name is hugh" -o out/hello.wav --pitch D3 --voice robot
-build/nvs render scores/demo.json -o out/demo.wav --voice female
-build/nvs plan scores/demo.json      # the syllable + phoneme timeline, as JSON
-build/nvs voices
+build/novox say "hello my name is hugh" -o out/hello.wav --pitch D3 --voice robot
+build/novox render scores/demo.json -o out/demo.wav --voice female
+build/novox plan scores/demo.json      # the syllable + phoneme timeline, as JSON
+build/novox voices
 
 # MIDI and MusicXML work directly (lyrics from the file, or supplied):
-build/nvs render melody.mid --lyrics "hap-py birth-day to you" -o out/song.wav
-build/nvs render song.musicxml --voice female -o out/song.wav
-build/nvs import melody.mid --lyrics "..." -o scores/melody.json   # editable JSON score
+build/novox render melody.mid --lyrics "hap-py birth-day to you" -o out/song.wav
+build/novox render song.musicxml --voice female -o out/song.wav
+build/novox import melody.mid --lyrics "..." -o scores/melody.json   # editable JSON score
 
 ctest --test-dir build   # engine tests
 ```
@@ -59,8 +59,8 @@ Python:
 
 ```python
 import sys; sys.path.insert(0, "bindings/python")
-import nvs
-singer = nvs.Singer()
+import novox
+singer = novox.Singer()
 audio = singer.render({"tempo": 100, "lyrics": "good mor-ning", "notes": ["C4 1", "E4 1", "G4 2"]})
 singer.save_wav("out/morning.wav", audio)
 
@@ -71,20 +71,20 @@ chunk = stream.process(512)                                      # next 512 samp
 
 ## Real-time streaming (for plugins)
 
-`nvs_stream_create` / `nvs_stream_process` render a score incrementally: any chunk size, any
-start position (`nvs_stream_seek`), no allocation in `process`, and output identical to an offline
+`novox_stream_create` / `novox_stream_process` render a score incrementally: any chunk size, any
+start position (`novox_stream_seek`), no allocation in `process`, and output identical to an offline
 render. Output is at a fixed level with a soft clip, and each voice is loudness-matched to the
 std voice (averaged over vowels and pitches), so presets sit within a few dB of each other. Onset consonants start
-before the beat, so audio begins `nvs_stream_lead()` seconds before score time 0.
+before the beat, so audio begins `novox_stream_lead()` seconds before score time 0.
 
 ## Plugin (AU / VST3) and standalone app
 
 ```bash
-cmake -S . -B build-plugin -DCMAKE_BUILD_TYPE=Release -DNVS_BUILD_PLUGIN=ON   # downloads JUCE 8
-cmake --build build-plugin -j --target NewVirtualSinger_All
+cmake -S . -B build-plugin -DCMAKE_BUILD_TYPE=Release -DNOVOX_BUILD_PLUGIN=ON   # downloads JUCE 8
+cmake --build build-plugin -j --target NovoxTheRobot_All
 # installs to ~/Library/Audio/Plug-Ins/{Components,VST3}; the app is in
-# build-plugin/plugin/NewVirtualSinger_artefacts/Release/Standalone/
-build-plugin/plugin/NvsPluginTests_artefacts/Release/NvsPluginTests   # headless transport tests
+# build-plugin/plugin/NovoxTheRobot_artefacts/Release/Standalone/
+build-plugin/plugin/NovoxPluginTests_artefacts/Release/NovoxPluginTests   # headless transport tests
 ```
 
 How it works in a DAW: add it as an instrument. The plugin keeps its own song (notes in beats,
@@ -101,8 +101,8 @@ The plugin is AGPLv3 (JUCE's open-source license); the engine it links stays MIT
 | Path | What |
 |---|---|
 | `engine/src/` | The engine: lexicon (CMU dict + spelling fallback), phoneme targets, planner (score → timeline), Klatt-style formant synth, voices |
-| `engine/include/nvs.h` | C API used by every front end |
-| `engine/cli/` | `nvs` command-line tool |
+| `engine/include/novox.h` | C API used by every front end |
+| `engine/cli/` | `novox` command-line tool |
 | `bindings/python/` | ctypes binding |
 | `tools/intelligibility.py` | Sings test sentences, transcribes with Whisper (local, free), reports word error rate |
 | `tools/spectrogram.py` | Spectrogram PNG of a render |

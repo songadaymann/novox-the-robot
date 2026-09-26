@@ -1,10 +1,10 @@
-// nvs: command-line front end for the New Virtual Singer engine.
+// novox: command-line front end for the Novox The Robot engine.
 //
-//   nvs render score.json -o out.wav [--voice robot] [--rate 48000]
-//   nvs plan score.json                 print the phoneme timeline as JSON
-//   nvs say "some words" -o out.wav [--pitch C4] [--voice female]
-//   nvs phonemes "some words"
-//   nvs voices
+//   novox render score.json -o out.wav [--voice robot] [--rate 48000]
+//   novox plan score.json                 print the phoneme timeline as JSON
+//   novox say "some words" -o out.wav [--pitch C4] [--voice female]
+//   novox phonemes "some words"
+//   novox voices
 
 #include <cstdlib>
 #include <algorithm>
@@ -17,7 +17,7 @@
 #include <string>
 #include <vector>
 
-#include "nvs.h"
+#include "novox.h"
 
 namespace {
 
@@ -56,10 +56,10 @@ std::string jsonEscape(const std::string& s) {
   return r;
 }
 
-// Finds data/cmudict.dict next to the executable's project, or via NVS_DICT.
+// Finds data/cmudict.dict next to the executable's project, or via NOVOX_DICT.
 std::string findDictionary(const char* argv0, const std::string& flag) {
   if (!flag.empty()) return flag;
-  if (const char* env = std::getenv("NVS_DICT")) return env;
+  if (const char* env = std::getenv("NOVOX_DICT")) return env;
   std::string exe = argv0;
   size_t slash = exe.find_last_of('/');
   std::string dir = slash == std::string::npos ? "." : exe.substr(0, slash);
@@ -73,14 +73,14 @@ std::string findDictionary(const char* argv0, const std::string& flag) {
 
 void usage() {
   std::cerr << "usage:\n"
-               "  nvs render <score.json|song.mid|song.musicxml> -o <out.wav> [--voice NAME] [--rate HZ]\n"
+               "  novox render <score.json|song.mid|song.musicxml> -o <out.wav> [--voice NAME] [--rate HZ]\n"
                "             [--lyrics \"hel-lo world\"] [--track N]\n"
-               "  nvs import <song.mid|song.musicxml> [-o score.json] [--lyrics ...] [--track N]\n"
-               "  nvs plan <score.json|song.mid|song.musicxml>\n"
-               "  nvs say \"words to sing\" -o <out.wav> [--pitch C4] [--beats 1] [--tempo 100] [--voice NAME]\n"
-               "  nvs phonemes \"words\"\n"
-               "  nvs voices\n"
-               "options: --dict PATH  extra cmudict-format dictionary (also $NVS_DICT)\n";
+               "  novox import <song.mid|song.musicxml> [-o score.json] [--lyrics ...] [--track N]\n"
+               "  novox plan <score.json|song.mid|song.musicxml>\n"
+               "  novox say \"words to sing\" -o <out.wav> [--pitch C4] [--beats 1] [--tempo 100] [--voice NAME]\n"
+               "  novox phonemes \"words\"\n"
+               "  novox voices\n"
+               "options: --dict PATH  extra cmudict-format dictionary (also $NOVOX_DICT)\n";
 }
 
 }  // namespace
@@ -113,32 +113,32 @@ int main(int argc, char** argv) {
   }
 
   if (cmd == "voices") {
-    char* names = nvs_voice_names();
+    char* names = novox_voice_names();
     std::cout << names << "\n";
-    nvs_free(names);
+    novox_free(names);
     return 0;
   }
 
-  nvs_engine* e = nvs_create(rate);
-  // The dictionary is built in; --dict / $NVS_DICT add or override entries.
-  if (!dict.empty() || std::getenv("NVS_DICT")) {
-    if (nvs_load_dictionary(e, findDictionary(argv[0], dict).c_str()) < 0) {
-      std::cerr << "warning: " << nvs_last_error(e) << "\n";
+  novox_engine* e = novox_create(rate);
+  // The dictionary is built in; --dict / $NOVOX_DICT add or override entries.
+  if (!dict.empty() || std::getenv("NOVOX_DICT")) {
+    if (novox_load_dictionary(e, findDictionary(argv[0], dict).c_str()) < 0) {
+      std::cerr << "warning: " << novox_last_error(e) << "\n";
     }
   }
 
   int status = 0;
   if (cmd == "phonemes") {
-    char* p = nvs_phonemize(e, input.c_str());
+    char* p = novox_phonemize(e, input.c_str());
     std::cout << p << "\n";
-    nvs_free(p);
+    novox_free(p);
   } else if (cmd == "render" || cmd == "plan" || cmd == "say" || cmd == "import") {
     std::string score;
     if (cmd == "say") {
       // One note per syllable on a single pitch: a quick pronunciation check.
-      char* phon = nvs_phonemize(e, input.c_str());
+      char* phon = novox_phonemize(e, input.c_str());
       std::istringstream syms(phon);
-      nvs_free(phon);
+      novox_free(phon);
       static const char* kVowels[] = {"AA", "AE", "AH", "AO", "AW", "AX", "AY", "EH",
                                       "ER", "EY", "IH", "IY", "OW", "OY", "UH", "UW"};
       int syllables = 0;
@@ -164,13 +164,13 @@ int main(int argc, char** argv) {
       bool isJson = first != std::string::npos && score[first] == '{';
       if (!isJson || cmd == "import") {
         std::string opts = "{\"track\": " + std::to_string(track) + ", \"lyrics\": \"" + jsonEscape(lyrics) + "\"}";
-        char* imported = nvs_import(e, score.data(), score.size(), opts.c_str());
+        char* imported = novox_import(e, score.data(), score.size(), opts.c_str());
         if (!imported) {
-          std::cerr << "error: " << nvs_last_error(e) << "\n";
+          std::cerr << "error: " << novox_last_error(e) << "\n";
           return 1;
         }
         score = imported;
-        nvs_free(imported);
+        novox_free(imported);
         size_t w = score.find("\"importWarnings\"");
         if (w != std::string::npos) std::cerr << "note: " << score.substr(w, score.find('\n', w) - w) << "\n";
       } else if (!lyrics.empty()) {
@@ -192,19 +192,19 @@ int main(int argc, char** argv) {
         std::cout << score;
       }
     } else if (cmd == "plan") {
-      char* plan = nvs_plan(e, score.c_str());
+      char* plan = novox_plan(e, score.c_str());
       if (!plan) {
-        std::cerr << "error: " << nvs_last_error(e) << "\n";
+        std::cerr << "error: " << novox_last_error(e) << "\n";
         status = 1;
       } else {
         std::cout << plan;
-        nvs_free(plan);
+        novox_free(plan);
       }
     } else {
       float* samples = nullptr;
       size_t n = 0;
-      if (nvs_render(e, score.c_str(), &samples, &n) != 0) {
-        std::cerr << "error: " << nvs_last_error(e) << "\n";
+      if (novox_render(e, score.c_str(), &samples, &n) != 0) {
+        std::cerr << "error: " << novox_last_error(e) << "\n";
         status = 1;
       } else {
         if (!writeWav(out, samples, n, static_cast<int>(rate))) {
@@ -213,13 +213,13 @@ int main(int argc, char** argv) {
         } else {
           std::cerr << "wrote " << out << " (" << static_cast<double>(n) / rate << " s)\n";
         }
-        nvs_free(samples);
+        novox_free(samples);
       }
     }
   } else {
     usage();
     status = 1;
   }
-  nvs_destroy(e);
+  novox_destroy(e);
   return status;
 }

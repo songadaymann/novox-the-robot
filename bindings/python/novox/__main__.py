@@ -1,11 +1,11 @@
-"""Command line: `nvs` (installed with pip) or `python -m nvs`.
+"""Command line: `novox` (installed with pip) or `python -m novox`.
 
-    nvs say "hello my name is hugh" -o hello.wav --pitch D3 --voice robot
-    nvs render song.json|song.mid|song.musicxml -o song.wav [--voice female] [--lyrics "..."]
-    nvs import song.mid --lyrics "hap-py birth-day" -o song.json
-    nvs plan song.json
-    nvs phonemes "some words"
-    nvs voices
+    novox say "hello my name is hugh" -o hello.wav --pitch D3 --voice robot
+    novox render song.json|song.mid|song.musicxml -o song.wav [--voice female] [--lyrics "..."]
+    novox import song.mid --lyrics "hap-py birth-day" -o song.json
+    novox plan song.json
+    novox phonemes "some words"
+    novox voices
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import NvsError, Singer
+from . import NovoxError, Singer
 
 VOWELS = {"AA", "AE", "AH", "AO", "AW", "AX", "AY", "EH", "ER", "EY", "IH", "IY", "OW", "OY", "UH", "UW"}
 
@@ -35,11 +35,11 @@ def _load_score(singer: Singer, path: str, lyrics: str, track: int) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="nvs", description="New Virtual Singer: formant singing synthesizer")
+    ap = argparse.ArgumentParser(prog="novox", description="Novox The Robot: formant singing synthesizer")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     def common(p):
-        p.add_argument("--voice", default="", help="voice preset (see `nvs voices`)")
+        p.add_argument("--voice", default="", help="voice preset (see `novox voices`)")
         p.add_argument("--rate", type=int, default=48000, help="sample rate")
         p.add_argument("--dict", default="", help="extra cmudict-format dictionary")
 
@@ -113,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
                 audio = singer.render(score)
                 singer.save_wav(args.out, audio)
                 print(f"wrote {args.out} ({len(audio) / args.rate:.2f} s)", file=sys.stderr)
-    except (NvsError, OSError, ValueError) as e:
+    except (NovoxError, OSError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
     return 0

@@ -1,5 +1,5 @@
 // Engine tests. Plain asserts, no framework: build with CMake and run `ctest`
-// (or build/nvs_tests directly).
+// (or build/novox_tests directly).
 
 #include <cmath>
 #include <cstdint>
@@ -14,7 +14,7 @@
 #include "import.hpp"
 #include "json.hpp"
 #include "lexicon.hpp"
-#include "nvs.h"
+#include "novox.h"
 #include "planner.hpp"
 #include "score.hpp"
 #include "synth.hpp"
@@ -42,31 +42,31 @@ std::string readFile(const std::string& path) {
   return ss.str();
 }
 
-const std::string kDemo = readFile(std::string(NVS_SOURCE_DIR) + "/scores/demo.json");
+const std::string kDemo = readFile(std::string(NOVOX_SOURCE_DIR) + "/scores/demo.json");
 
-nvs::Lexicon embeddedLexicon() {
-  nvs::Lexicon lex;
+novox::Lexicon embeddedLexicon() {
+  novox::Lexicon lex;
   lex.loadEmbedded();
   return lex;
 }
 
-nvs::Plan planOf(const std::string& json) {
-  nvs::Score score = nvs::parseScore(nvs::json::parse(json));
-  nvs::Lexicon lex = embeddedLexicon();
+novox::Plan planOf(const std::string& json) {
+  novox::Score score = novox::parseScore(novox::json::parse(json));
+  novox::Lexicon lex = embeddedLexicon();
   for (const auto& [w, p] : score.dictionary) lex.addWord(w, p);
-  return nvs::planScore(score, lex);
+  return novox::planScore(score, lex);
 }
 
 // ---------------------------------------------------------------------------
 
 void testJson() {
-  auto v = nvs::json::parse("{\"a\": [1, 2, 3,], // comment\n \"b\": \"x\\ny\", \"c\": true}");
+  auto v = novox::json::parse("{\"a\": [1, 2, 3,], // comment\n \"b\": \"x\\ny\", \"c\": true}");
   CHECK(v["a"].array.size() == 3);
   CHECK(v["b"].string == "x\ny");
   CHECK(v["c"].boolean);
   bool threw = false;
   try {
-    nvs::json::parse("{\"a\": }");
+    novox::json::parse("{\"a\": }");
   } catch (const std::exception&) {
     threw = true;
   }
@@ -75,24 +75,24 @@ void testJson() {
 
 void testPitchAndLyrics() {
   float m = 0;
-  CHECK(nvs::parsePitch("C4", m) && m == 60);
-  CHECK(nvs::parsePitch("F#3", m) && m == 54);
-  CHECK(nvs::parsePitch("Bb5", m) && m == 82);
-  CHECK(nvs::parsePitch("61.5", m) && m == 61.5f);
-  CHECK(!nvs::parsePitch("H2", m));
-  auto t = nvs::tokenizeLyrics("hap-py birth-day _ {HH EH L OW}");
+  CHECK(novox::parsePitch("C4", m) && m == 60);
+  CHECK(novox::parsePitch("F#3", m) && m == 54);
+  CHECK(novox::parsePitch("Bb5", m) && m == 82);
+  CHECK(novox::parsePitch("61.5", m) && m == 61.5f);
+  CHECK(!novox::parsePitch("H2", m));
+  auto t = novox::tokenizeLyrics("hap-py birth-day _ {HH EH L OW}");
   CHECK(t.size() == 6);
   CHECK(t[0] == "hap-" && t[1] == "py" && t[4] == "_" && t[5] == "{HH EH L OW}");
 }
 
 void testLexicon() {
-  nvs::Lexicon lex = embeddedLexicon();
+  novox::Lexicon lex = embeddedLexicon();
   CHECK(lex.size() > 100000);
   bool known = false;
   auto canoe = lex.lookup("Canoe", &known);
   CHECK(known);
   int vowels = 0;
-  for (const auto& p : canoe) vowels += nvs::isVowelSymbol(p.symbol);
+  for (const auto& p : canoe) vowels += novox::isVowelSymbol(p.symbol);
   CHECK(vowels == 2);
   CHECK(lex.addWord("hugh", "HH Y UW1"));
   auto hugh = lex.lookup("Hugh");
@@ -103,7 +103,7 @@ void testLexicon() {
 
 void testLyricFlow() {
   // "canoe" flows over two notes; "_" holds; a missing lyric hums.
-  nvs::Plan p = planOf(R"({"tempo": 120, "lyrics": "the canoe _", "notes": ["C4 1", "D4 1", "E4 1", "F4 1", "G4 1"]})");
+  novox::Plan p = planOf(R"({"tempo": 120, "lyrics": "the canoe _", "notes": ["C4 1", "D4 1", "E4 1", "F4 1", "G4 1"]})");
   CHECK(p.syllables.size() == 4);
   CHECK(p.syllables[0].text == "the");
   CHECK(p.syllables[1].text == "canoe" && p.syllables[1].continues);
@@ -113,7 +113,7 @@ void testLyricFlow() {
 }
 
 void testPlanInvariants() {
-  nvs::Plan p = planOf(kDemo);
+  novox::Plan p = planOf(kDemo);
   CHECK(!p.segments.empty());
   CHECK(p.warnings.empty());
   for (size_t i = 0; i < p.segments.size(); ++i) {
@@ -127,20 +127,20 @@ void testPlanInvariants() {
   for (const auto& syl : p.syllables) {
     bool found = false;
     for (const auto& s : p.segments) {
-      if (s.kind == nvs::SegKind::Vowel && std::fabs(s.start - (syl.start + p.lead)) < 1e-6) found = true;
+      if (s.kind == novox::SegKind::Vowel && std::fabs(s.start - (syl.start + p.lead)) < 1e-6) found = true;
     }
     CHECK(found);
   }
 }
 
 std::vector<float> offline(const std::string& json, bool normalize) {
-  nvs::Score score = nvs::parseScore(nvs::json::parse(json));
-  nvs::Lexicon lex = embeddedLexicon();
+  novox::Score score = novox::parseScore(novox::json::parse(json));
+  novox::Lexicon lex = embeddedLexicon();
   for (const auto& [w, p] : score.dictionary) lex.addWord(w, p);
-  nvs::RenderOptions o;
+  novox::RenderOptions o;
   o.sampleRate = 44100;
   o.normalize = normalize;
-  return nvs::renderPlan(nvs::planScore(score, lex), score.voice, o);
+  return novox::renderPlan(novox::planScore(score, lex), score.voice, o);
 }
 
 void testDeterminismAndStreaming() {
@@ -149,10 +149,10 @@ void testDeterminismAndStreaming() {
   CHECK(a.size() == b.size() && std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0);
 
   // Streaming in awkward chunk sizes gives bit-identical audio.
-  nvs::Score score = nvs::parseScore(nvs::json::parse(kDemo));
-  nvs::Lexicon lex = embeddedLexicon();
+  novox::Score score = novox::parseScore(novox::json::parse(kDemo));
+  novox::Lexicon lex = embeddedLexicon();
   for (const auto& [w, p] : score.dictionary) lex.addWord(w, p);
-  nvs::Stream stream(nvs::planScore(score, lex), score.voice, 44100);
+  novox::Stream stream(novox::planScore(score, lex), score.voice, 44100);
   CHECK(stream.length() == a.size());
   std::vector<float> s(stream.length() + 1000);
   size_t pos = 0;
@@ -216,7 +216,7 @@ std::vector<uint8_t> tinyMidi() {
 
 void testMidiImport() {
   std::vector<std::string> warnings;
-  nvs::Score s = nvs::importAny(tinyMidi(), {}, warnings);
+  novox::Score s = novox::importAny(tinyMidi(), {}, warnings);
   CHECK(s.notes.size() == 2);
   CHECK_NEAR(s.tempo, 120.0, 1e-6);
   CHECK(s.notes[0].pitch == 60 && s.notes[1].pitch == 64);
@@ -226,7 +226,7 @@ void testMidiImport() {
   CHECK(s.notes[0].lyric == "hel-" && s.notes[1].lyric == "lo");
   CHECK(warnings.size() == 1);  // chord note dropped
   // Round-trips through JSON into the renderer.
-  nvs::Plan p = planOf(nvs::scoreToJson(s));
+  novox::Plan p = planOf(novox::scoreToJson(s));
   CHECK(p.syllables.size() == 2 && p.syllables[0].text == "hel" && p.syllables[0].continues);
 }
 
@@ -247,7 +247,7 @@ void testMusicXmlImport() {
 </measure></part></score-partwise>)";
   std::vector<std::string> warnings;
   std::vector<uint8_t> bytes(xml, xml + std::strlen(xml));
-  nvs::Score s = nvs::importAny(bytes, {}, warnings);
+  novox::Score s = novox::importAny(bytes, {}, warnings);
   CHECK(s.notes.size() == 3);  // tie merged, voice 2 skipped
   CHECK_NEAR(s.notes[1].dur, 2.0, 1e-9);
   CHECK(s.notes[0].lyric == "sing-" && s.notes[1].lyric == "ing" && s.notes[2].lyric == "_");
@@ -256,28 +256,28 @@ void testMusicXmlImport() {
 }
 
 void testCApi() {
-  nvs_engine* e = nvs_create(22050);
+  novox_engine* e = novox_create(22050);
   float* buf = nullptr;
   size_t n = 0;
-  CHECK(nvs_render(e, "{\"notes\": [\"X9 1\"]}", &buf, &n) != 0);
-  CHECK(std::string(nvs_last_error(e)).find("bad pitch") != std::string::npos);
-  CHECK(nvs_render(e, "{\"tempo\": 120, \"lyrics\": \"la\", \"notes\": [\"A3 1\"]}", &buf, &n) == 0);
+  CHECK(novox_render(e, "{\"notes\": [\"X9 1\"]}", &buf, &n) != 0);
+  CHECK(std::string(novox_last_error(e)).find("bad pitch") != std::string::npos);
+  CHECK(novox_render(e, "{\"tempo\": 120, \"lyrics\": \"la\", \"notes\": [\"A3 1\"]}", &buf, &n) == 0);
   CHECK(n > 22050 / 2);
-  nvs_free(buf);
-  nvs_stream* s = nvs_stream_create(e, "{\"tempo\": 120, \"lyrics\": \"la la\", \"notes\": [\"A3 1\", \"C4 1\"]}");
+  novox_free(buf);
+  novox_stream* s = novox_stream_create(e, "{\"tempo\": 120, \"lyrics\": \"la la\", \"notes\": [\"A3 1\", \"C4 1\"]}");
   CHECK(s != nullptr);
-  CHECK(nvs_stream_lead(s) > 0);
+  CHECK(novox_stream_lead(s) > 0);
   std::vector<float> out(512);
   size_t total = 0;
-  while (size_t got = nvs_stream_process(s, out.data(), out.size())) total += got;
-  CHECK(total == nvs_stream_length(s));
-  nvs_stream_destroy(s);
+  while (size_t got = novox_stream_process(s, out.data(), out.size())) total += got;
+  CHECK(total == novox_stream_length(s));
+  novox_stream_destroy(s);
   auto midi = tinyMidi();
-  char* json = nvs_import(e, midi.data(), midi.size(), "{\"voice\": \"robot\"}");
+  char* json = novox_import(e, midi.data(), midi.size(), "{\"voice\": \"robot\"}");
   CHECK(json && std::string(json).find("\"voice\": \"robot\"") != std::string::npos);
   CHECK(json && std::string(json).find("importWarnings") != std::string::npos);
-  nvs_free(json);
-  nvs_destroy(e);
+  novox_free(json);
+  novox_destroy(e);
 }
 
 }  // namespace

@@ -3,7 +3,7 @@ requires = ["scikit-build-core>=0.10"]
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "new-virtual-singer"
+name = "novox"
 version = "0.1.0"
 description = "Formant singing synthesizer: type lyrics, give it a melody, it sings (in the spirit of Myriad's Virtual Singer)"
 readme = "README.md"
@@ -22,18 +22,18 @@ classifiers = [
 numpy = ["numpy"]
 
 [project.scripts]
-nvs = "nvs.__main__:main"
+novox = "novox.__main__:main"
 
 [tool.scikit-build]
 minimum-version = "0.10"
 cmake.build-type = "Release"
-wheel.packages = ["bindings/python/nvs"]
+wheel.packages = ["bindings/python/novox"]
 wheel.py-api = "py3"   # the engine is loaded with ctypes: one wheel for every Python 3
-build.targets = ["nvs_shared"]
+build.targets = ["novox_shared"]
 install.components = ["python"]
 sdist.exclude = ["out", "reference", "build", "tools/.venv", "mockups"]
 
 [tool.scikit-build.cmake.define]
-NVS_BUILD_CLI = "OFF"
-NVS_BUILD_TESTS = "OFF"
+NOVOX_BUILD_CLI = "OFF"
+NOVOX_BUILD_TESTS = "OFF"
 CMAKE_OSX_DEPLOYMENT_TARGET = "11.0"

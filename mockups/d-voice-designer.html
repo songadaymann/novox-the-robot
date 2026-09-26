@@ -120,7 +120,7 @@
 <body>
 <div class="win">
   <div class="tb">
-    <div class="title"><div class="lights"><i></i><i></i><i></i></div><b>New Virtual Singer — Voices</b></div>
+    <div class="title"><div class="lights"><i></i><i></i><i></i></div><b>Novox The Robot — Voices</b></div>
     <div class="tools">
       <div class="seg" id="seg"><button data-p="lyr">Notes &amp; Lyrics</button><button data-p="aud">Sing from Audio</button><button class="on" data-p="voi">Voices</button></div>
       <div class="sp"></div>
@@ -340,7 +340,7 @@ $('acc').onclick=()=>$('sheet').classList.add('on');$('sho').onclick=$('shc').on
 
 // ---------- pages ----------
 document.querySelectorAll('#seg button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#seg button').forEach(x=>x.classList.toggle('on',x===b));document.querySelectorAll('.page').forEach(p=>p.classList.toggle('on',p.id==='p-'+b.dataset.p));
-  document.querySelector('.title b').textContent='New Virtual Singer — '+b.textContent;});
+  document.querySelector('.title b').textContent='Novox The Robot — '+b.textContent;});
 (()=>{const r=$('nroll');const N=[[67,0,.5,'the'],[72,.5,.75,'ket-'],[71,1.25,.25,'tle'],[69,1.5,1,'sings'],[67,2.5,.5,'at'],[76,3,.75,'sev-'],[74,3.75,.25,'en'],[72,4,.5,'and'],[74,4.5,.5,'I'],[76,5,.5,'hum'],[74,5.5,.5,'a-'],[72,6,1,'long'],[71,7,.5,'—'],[72,7.5,1.25,'—']];
   N.forEach(([p,s,d,t])=>{const e=document.createElement('div');e.className='n';e.style.left=10+s*90+'px';e.style.width=d*90-2+'px';e.style.top=(80-p)*18+2+'px';e.textContent=t;r.appendChild(e);});})();
 

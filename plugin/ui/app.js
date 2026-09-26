@@ -1,4 +1,4 @@
-// New Virtual Singer plugin editor. Plain ES module, no dependencies.
+// Novox The Robot plugin editor. Plain ES module, no dependencies.
 //
 // Sections:
 //   1. constants + helpers        5. roll drawing (canvas)
@@ -1274,7 +1274,7 @@ async function boot() {
   fetchPlan();
 }
 
-window.__nvs = { S, H }; // for debugging from the console
+window.__novox = { S, H }; // for debugging from the console
 new ResizeObserver(measure).observe(els.gridwrap);
 window.addEventListener("resize", measure);
 if (window.innerWidth <= 900) setPanel(false);

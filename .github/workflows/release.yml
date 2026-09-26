@@ -1,5 +1,5 @@
 # Builds release artifacts when a version tag (v*) is pushed:
-#   - nvs CLI binaries (macOS universal, Linux x86_64, Windows x86_64) attached to the GitHub release
+#   - novox CLI binaries (macOS universal, Linux x86_64, Windows x86_64) attached to the GitHub release
 #   - Python wheels + sdist, published to PyPI (configure PyPI trusted publishing for this repo)
 #   - npm package with the WebAssembly engine (needs an NPM_TOKEN repository secret)
 name: Release
@@ -14,22 +14,22 @@ jobs:
     strategy:
       matrix:
         include:
-          - { os: macos-latest, name: macos-universal, flags: "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0", exe: nvs }
-          - { os: ubuntu-latest, name: linux-x86_64, flags: "", exe: nvs }
-          - { os: windows-latest, name: windows-x86_64, flags: "", exe: Release/nvs.exe }
+          - { os: macos-latest, name: macos-universal, flags: "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0", exe: novox }
+          - { os: ubuntu-latest, name: linux-x86_64, flags: "", exe: novox }
+          - { os: windows-latest, name: windows-x86_64, flags: "", exe: Release/novox.exe }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNVS_BUILD_TESTS=OFF ${{ matrix.flags }}
-      - run: cmake --build build --config Release -j 4 --target nvs
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNOVOX_BUILD_TESTS=OFF ${{ matrix.flags }}
+      - run: cmake --build build --config Release -j 4 --target novox
       - shell: bash
         run: |
           mkdir dist && cp build/${{ matrix.exe }} dist/ && cp LICENSE README.md dist/
-          cd dist && tar czf ../nvs-${{ github.ref_name }}-${{ matrix.name }}.tar.gz *
+          cd dist && tar czf ../novox-${{ github.ref_name }}-${{ matrix.name }}.tar.gz *
       - uses: softprops/action-gh-release@v2
-        with: { files: "nvs-*.tar.gz" }
+        with: { files: "novox-*.tar.gz" }
 
   wheels:
     strategy:

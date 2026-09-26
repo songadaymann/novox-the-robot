@@ -15,7 +15,7 @@ juce::var noteToVar(const SongNote& n) {
 
 juce::String Song::toJson() const {
   auto* o = new juce::DynamicObject();
-  o->setProperty("format", "new-virtual-singer-song");
+  o->setProperty("format", "novox-song");
   o->setProperty("version", 1);
   o->setProperty("lyrics", lyrics);
   o->setProperty("voice", voice);

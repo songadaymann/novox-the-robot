@@ -1,7 +1,7 @@
-"""Python bindings for the New Virtual Singer engine (ctypes over libnvs).
+"""Python bindings for the Novox The Robot engine (ctypes over libnovox).
 
-    import nvs
-    singer = nvs.Singer()
+    import novox
+    singer = novox.Singer()
     audio = singer.render({"tempo": 100, "lyrics": "hel-lo", "notes": ["C4 1", "E4 1"]})
     singer.save_wav("hello.wav", audio)
 
@@ -19,21 +19,21 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]  # repository root when running from a source checkout
-_LIB_NAMES = {"darwin": "libnvs.dylib", "win32": "nvs.dll"}
+_LIB_NAMES = {"darwin": "libnovox.dylib", "win32": "novox.dll"}
 
 __version__ = "0.1.0"
 
 
 def _find_library() -> Path:
-    name = _LIB_NAMES.get(sys.platform, "libnvs.so")
-    # Installed wheel: next to this file. Source checkout: build/. Override: $NVS_LIB.
-    for candidate in (os.environ.get("NVS_LIB"), HERE / name, ROOT / "build" / name):
+    name = _LIB_NAMES.get(sys.platform, "libnovox.so")
+    # Installed wheel: next to this file. Source checkout: build/. Override: $NOVOX_LIB.
+    for candidate in (os.environ.get("NOVOX_LIB"), HERE / name, ROOT / "build" / name):
         if candidate and Path(candidate).exists():
             return Path(candidate)
     raise FileNotFoundError(f"{name} not found; build the engine first (cmake --build build)")
 
 
-class NvsError(RuntimeError):
+class NovoxError(RuntimeError):
     pass
 
 
@@ -42,55 +42,55 @@ class Singer:
                  library: str | os.PathLike | None = None):
         self.sample_rate = sample_rate
         lib = ctypes.CDLL(str(library or _find_library()))
-        lib.nvs_create.restype = ctypes.c_void_p
-        lib.nvs_create.argtypes = [ctypes.c_double]
-        lib.nvs_destroy.argtypes = [ctypes.c_void_p]
-        lib.nvs_load_dictionary.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
-        lib.nvs_add_word.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p]
-        lib.nvs_render.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
+        lib.novox_create.restype = ctypes.c_void_p
+        lib.novox_create.argtypes = [ctypes.c_double]
+        lib.novox_destroy.argtypes = [ctypes.c_void_p]
+        lib.novox_load_dictionary.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+        lib.novox_add_word.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p]
+        lib.novox_render.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
                                    ctypes.POINTER(ctypes.POINTER(ctypes.c_float)),
                                    ctypes.POINTER(ctypes.c_size_t)]
-        for fn in ("nvs_plan", "nvs_phonemize"):
+        for fn in ("novox_plan", "novox_phonemize"):
             getattr(lib, fn).restype = ctypes.c_void_p
             getattr(lib, fn).argtypes = [ctypes.c_void_p, ctypes.c_char_p]
-        lib.nvs_voice_names.restype = ctypes.c_void_p
-        lib.nvs_last_error.restype = ctypes.c_char_p
-        lib.nvs_last_error.argtypes = [ctypes.c_void_p]
-        lib.nvs_free.argtypes = [ctypes.c_void_p]
-        lib.nvs_import.restype = ctypes.c_void_p
-        lib.nvs_import.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_char_p]
-        lib.nvs_stream_create.restype = ctypes.c_void_p
-        lib.nvs_stream_create.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
-        lib.nvs_stream_destroy.argtypes = [ctypes.c_void_p]
-        for fn in ("nvs_stream_length", "nvs_stream_position"):
+        lib.novox_voice_names.restype = ctypes.c_void_p
+        lib.novox_last_error.restype = ctypes.c_char_p
+        lib.novox_last_error.argtypes = [ctypes.c_void_p]
+        lib.novox_free.argtypes = [ctypes.c_void_p]
+        lib.novox_import.restype = ctypes.c_void_p
+        lib.novox_import.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_char_p]
+        lib.novox_stream_create.restype = ctypes.c_void_p
+        lib.novox_stream_create.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+        lib.novox_stream_destroy.argtypes = [ctypes.c_void_p]
+        for fn in ("novox_stream_length", "novox_stream_position"):
             getattr(lib, fn).restype = ctypes.c_size_t
             getattr(lib, fn).argtypes = [ctypes.c_void_p]
-        lib.nvs_stream_lead.restype = ctypes.c_double
-        lib.nvs_stream_lead.argtypes = [ctypes.c_void_p]
-        lib.nvs_stream_seek.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
-        lib.nvs_stream_process.restype = ctypes.c_size_t
-        lib.nvs_stream_process.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_float), ctypes.c_size_t]
+        lib.novox_stream_lead.restype = ctypes.c_double
+        lib.novox_stream_lead.argtypes = [ctypes.c_void_p]
+        lib.novox_stream_seek.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+        lib.novox_stream_process.restype = ctypes.c_size_t
+        lib.novox_stream_process.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_float), ctypes.c_size_t]
         self._lib = lib
-        self._engine = lib.nvs_create(sample_rate)
+        self._engine = lib.novox_create(sample_rate)
         # The CMU dictionary is compiled in; `dictionary` adds a cmudict-format file on top.
-        if dictionary and lib.nvs_load_dictionary(self._engine, str(dictionary).encode()) < 0:
-            raise NvsError(self._error())
+        if dictionary and lib.novox_load_dictionary(self._engine, str(dictionary).encode()) < 0:
+            raise NovoxError(self._error())
 
     def __del__(self):
         if getattr(self, "_engine", None):
-            self._lib.nvs_destroy(self._engine)
+            self._lib.novox_destroy(self._engine)
             self._engine = None
 
     def _error(self) -> str:
-        return self._lib.nvs_last_error(self._engine).decode()
+        return self._lib.novox_last_error(self._engine).decode()
 
     def _take_string(self, ptr) -> str:
         if not ptr:
-            raise NvsError(self._error())
+            raise NovoxError(self._error())
         try:
             return ctypes.string_at(ptr).decode()
         finally:
-            self._lib.nvs_free(ptr)
+            self._lib.novox_free(ptr)
 
     @staticmethod
     def _score_text(score) -> bytes:
@@ -100,8 +100,8 @@ class Singer:
         """Render a score (dict or JSON string) to mono float samples."""
         buf = ctypes.POINTER(ctypes.c_float)()
         count = ctypes.c_size_t()
-        if self._lib.nvs_render(self._engine, self._score_text(score), ctypes.byref(buf), ctypes.byref(count)):
-            raise NvsError(self._error())
+        if self._lib.novox_render(self._engine, self._score_text(score), ctypes.byref(buf), ctypes.byref(count)):
+            raise NovoxError(self._error())
         try:
             try:
                 import numpy as np
@@ -109,34 +109,34 @@ class Singer:
             except ImportError:
                 return buf[: count.value]
         finally:
-            self._lib.nvs_free(buf)
+            self._lib.novox_free(buf)
 
     def plan(self, score) -> dict:
         """The syllables and phoneme segments the engine would sing."""
-        return json.loads(self._take_string(self._lib.nvs_plan(self._engine, self._score_text(score))))
+        return json.loads(self._take_string(self._lib.novox_plan(self._engine, self._score_text(score))))
 
     def phonemize(self, text: str) -> str:
-        return self._take_string(self._lib.nvs_phonemize(self._engine, text.encode()))
+        return self._take_string(self._lib.novox_phonemize(self._engine, text.encode()))
 
     def add_word(self, word: str, arpabet: str) -> None:
-        if self._lib.nvs_add_word(self._engine, word.encode(), arpabet.encode()):
-            raise NvsError(self._error())
+        if self._lib.novox_add_word(self._engine, word.encode(), arpabet.encode()):
+            raise NovoxError(self._error())
 
     def import_file(self, path, lyrics: str = "", track: int = -1, voice: str = "") -> dict:
         """Read a MIDI or MusicXML file into a score dict (render it with render())."""
         data = Path(path).read_bytes()
         opts = json.dumps({"lyrics": lyrics, "track": track, **({"voice": voice} if voice else {})})
-        return json.loads(self._take_string(self._lib.nvs_import(self._engine, data, len(data), opts.encode())))
+        return json.loads(self._take_string(self._lib.novox_import(self._engine, data, len(data), opts.encode())))
 
     def stream(self, score) -> "Stream":
         """Incremental renderer (what a plugin uses): process(n) returns the next n samples."""
-        ptr = self._lib.nvs_stream_create(self._engine, self._score_text(score))
+        ptr = self._lib.novox_stream_create(self._engine, self._score_text(score))
         if not ptr:
-            raise NvsError(self._error())
+            raise NovoxError(self._error())
         return Stream(self, ptr)
 
     def voices(self) -> list[str]:
-        return self._take_string(self._lib.nvs_voice_names()).split(",")
+        return self._take_string(self._lib.novox_voice_names()).split(",")
 
     def save_wav(self, path, samples) -> None:
         """Write mono 16-bit PCM at this singer's sample rate."""
@@ -159,28 +159,28 @@ class Stream:
 
     def __del__(self):
         if getattr(self, "_ptr", None):
-            self._lib.nvs_stream_destroy(self._ptr)
+            self._lib.novox_stream_destroy(self._ptr)
             self._ptr = None
 
     @property
     def length(self) -> int:
-        return self._lib.nvs_stream_length(self._ptr)
+        return self._lib.novox_stream_length(self._ptr)
 
     @property
     def position(self) -> int:
-        return self._lib.nvs_stream_position(self._ptr)
+        return self._lib.novox_stream_position(self._ptr)
 
     @property
     def lead(self) -> float:
         """Seconds of pre-roll before score time 0."""
-        return self._lib.nvs_stream_lead(self._ptr)
+        return self._lib.novox_stream_lead(self._ptr)
 
     def seek(self, sample: int) -> None:
-        self._lib.nvs_stream_seek(self._ptr, sample)
+        self._lib.novox_stream_seek(self._ptr, sample)
 
     def process(self, frames: int):
         buf = (ctypes.c_float * frames)()
-        self._lib.nvs_stream_process(self._ptr, buf, frames)
+        self._lib.novox_stream_process(self._ptr, buf, frames)
         try:
             import numpy as np
             return np.frombuffer(buf, dtype=np.float32).copy()

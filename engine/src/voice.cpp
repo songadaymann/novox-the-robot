@@ -1,6 +1,6 @@
 #include "voice.hpp"
 
-namespace nvs {
+namespace novox {
 
 namespace {
 
@@ -171,4 +171,4 @@ void applyVoiceJson(const json::Value& o, Voice& v) {
   }
 }
 
-}  // namespace nvs
+}  // namespace novox

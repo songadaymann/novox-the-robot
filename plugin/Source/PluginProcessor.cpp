@@ -17,54 +17,54 @@ std::shared_ptr<SharedEngine> SharedEngine::get() {
   return e;
 }
 
-SharedEngine::SharedEngine() { engine_ = nvs_create(48000); }
-SharedEngine::~SharedEngine() { nvs_destroy(engine_); }
+SharedEngine::SharedEngine() { engine_ = novox_create(48000); }
+SharedEngine::~SharedEngine() { novox_destroy(engine_); }
 
 bool SharedEngine::render(const juce::String& scoreJson, double sampleRate, std::vector<float>& out, double& lead,
                           juce::String& error) {
   std::lock_guard<std::mutex> lock(mutex_);
-  nvs_set_sample_rate(engine_, sampleRate);
-  nvs_stream* s = nvs_stream_create(engine_, scoreJson.toRawUTF8());
+  novox_set_sample_rate(engine_, sampleRate);
+  novox_stream* s = novox_stream_create(engine_, scoreJson.toRawUTF8());
   if (!s) {
-    error = nvs_last_error(engine_);
+    error = novox_last_error(engine_);
     return false;
   }
-  out.assign(nvs_stream_length(s), 0.0f);
-  nvs_stream_process(s, out.data(), out.size());
-  lead = nvs_stream_lead(s);
-  nvs_stream_destroy(s);
+  out.assign(novox_stream_length(s), 0.0f);
+  novox_stream_process(s, out.data(), out.size());
+  lead = novox_stream_lead(s);
+  novox_stream_destroy(s);
   return true;
 }
 
 juce::String SharedEngine::plan(const juce::String& scoreJson, juce::String& error) {
   std::lock_guard<std::mutex> lock(mutex_);
-  char* p = nvs_plan(engine_, scoreJson.toRawUTF8());
+  char* p = novox_plan(engine_, scoreJson.toRawUTF8());
   if (!p) {
-    error = nvs_last_error(engine_);
+    error = novox_last_error(engine_);
     return {};
   }
   juce::String result = juce::String::fromUTF8(p);
-  nvs_free(p);
+  novox_free(p);
   return result;
 }
 
 juce::String SharedEngine::importFile(const juce::MemoryBlock& data, const juce::String& optionsJson,
                                       juce::String& error) {
   std::lock_guard<std::mutex> lock(mutex_);
-  char* p = nvs_import(engine_, data.getData(), data.getSize(), optionsJson.toRawUTF8());
+  char* p = novox_import(engine_, data.getData(), data.getSize(), optionsJson.toRawUTF8());
   if (!p) {
-    error = nvs_last_error(engine_);
+    error = novox_last_error(engine_);
     return {};
   }
   juce::String result = juce::String::fromUTF8(p);
-  nvs_free(p);
+  novox_free(p);
   return result;
 }
 
 juce::StringArray SharedEngine::voices() {
-  char* names = nvs_voice_names();
+  char* names = novox_voice_names();
   juce::StringArray list = juce::StringArray::fromTokens(juce::String::fromUTF8(names), ",", "");
-  nvs_free(names);
+  novox_free(names);
   return list;
 }
 
@@ -75,7 +75,7 @@ namespace {
 
 class RenderThread : public juce::Thread {
  public:
-  explicit RenderThread(std::function<void()> body) : juce::Thread("NVS render"), body_(std::move(body)) {}
+  explicit RenderThread(std::function<void()> body) : juce::Thread("Novox render"), body_(std::move(body)) {}
   void run() override { body_(); }
 
  private:
@@ -84,7 +84,7 @@ class RenderThread : public juce::Thread {
 
 }  // namespace
 
-NvsProcessor::NvsProcessor()
+NovoxProcessor::NovoxProcessor()
     : juce::AudioProcessor(BusesProperties().withOutput("Output", juce::AudioChannelSet::stereo(), true)),
       engine_(SharedEngine::get()) {
   heldSince_.fill(-1.0);
@@ -95,19 +95,19 @@ NvsProcessor::NvsProcessor()
   startTimerHz(30);
 }
 
-NvsProcessor::~NvsProcessor() {
+NovoxProcessor::~NovoxProcessor() {
   stopTimer();
   worker_->signalThreadShouldExit();
   renderRequested_.signal();
   worker_->stopThread(5000);
 }
 
-bool NvsProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const {
+bool NovoxProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const {
   const auto& out = layouts.getMainOutputChannelSet();
   return out == juce::AudioChannelSet::mono() || out == juce::AudioChannelSet::stereo();
 }
 
-void NvsProcessor::prepareToPlay(double sampleRate, int) {
+void NovoxProcessor::prepareToPlay(double sampleRate, int) {
   if (std::abs(sampleRate - sampleRate_.load()) > 0.5) {
     sampleRate_ = sampleRate;
     requestRender();
@@ -117,7 +117,7 @@ void NvsProcessor::prepareToPlay(double sampleRate, int) {
 // ---------------------------------------------------------------------------
 // Audio thread
 
-void NvsProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) {
+void NovoxProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) {
   juce::ScopedNoDenormals noDenormals;
   const int n = buffer.getNumSamples();
   const double sr = getSampleRate() > 0 ? getSampleRate() : sampleRate_.load();
@@ -193,7 +193,7 @@ void NvsProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuff
 // ---------------------------------------------------------------------------
 // Message thread
 
-void NvsProcessor::timerCallback() {
+void NovoxProcessor::timerCallback() {
   // Captured notes -> song.
   int start1, size1, start2, size2;
   const int ready = captureFifo_.getNumReady();
@@ -238,12 +238,12 @@ void NvsProcessor::timerCallback() {
                  retired_.end());
 }
 
-void NvsProcessor::requestRender() {
+void NovoxProcessor::requestRender() {
   rendering_ = true;
   renderRequested_.signal();
 }
 
-void NvsProcessor::renderWorker() {
+void NovoxProcessor::renderWorker() {
   while (!worker_->threadShouldExit()) {
     renderRequested_.wait(-1);
     if (worker_->threadShouldExit()) break;
@@ -283,12 +283,12 @@ void NvsProcessor::renderWorker() {
   }
 }
 
-juce::String NvsProcessor::getSongJson() const {
+juce::String NovoxProcessor::getSongJson() const {
   std::lock_guard<std::mutex> lock(songMutex_);
   return song_.toJson();
 }
 
-void NvsProcessor::setSongJson(const juce::String& json) {
+void NovoxProcessor::setSongJson(const juce::String& json) {
   {
     std::lock_guard<std::mutex> lock(songMutex_);
     song_ = Song::fromJson(json);
@@ -297,7 +297,7 @@ void NvsProcessor::setSongJson(const juce::String& json) {
   requestRender();
 }
 
-juce::String NvsProcessor::planJson(juce::String& error) {
+juce::String NovoxProcessor::planJson(juce::String& error) {
   juce::String score;
   {
     std::lock_guard<std::mutex> lock(songMutex_);
@@ -306,24 +306,24 @@ juce::String NvsProcessor::planJson(juce::String& error) {
   return engine_->plan(score, error);
 }
 
-juce::String NvsProcessor::importFile(const juce::MemoryBlock& data, const juce::String& lyrics,
+juce::String NovoxProcessor::importFile(const juce::MemoryBlock& data, const juce::String& lyrics,
                                       juce::String& error) {
   auto* o = new juce::DynamicObject();
   o->setProperty("lyrics", lyrics);
   return engine_->importFile(data, juce::JSON::toString(juce::var(o)), error);
 }
 
-void NvsProcessor::setPreviewPlaying(bool playing) {
+void NovoxProcessor::setPreviewPlaying(bool playing) {
   if (playing && !previewPlaying_.load()) previewSamples_ = 0;  // start from the top
   previewPlaying_ = playing;
 }
 
-void NvsProcessor::setPreviewTempo(double bpm) {
+void NovoxProcessor::setPreviewTempo(double bpm) {
   previewBpm_ = juce::jlimit(20.0, 400.0, bpm);
   if (!hostTransport_.load()) requestRender();
 }
 
-NvsProcessor::Status NvsProcessor::getStatus() const {
+NovoxProcessor::Status NovoxProcessor::getStatus() const {
   Status s;
   s.beats = playheadBeats_.load();
   s.bpm = hostTransport_.load() ? hostBpm_.load() : previewBpm_.load();
@@ -342,11 +342,11 @@ NvsProcessor::Status NvsProcessor::getStatus() const {
 // ---------------------------------------------------------------------------
 // State
 
-void NvsProcessor::getStateInformation(juce::MemoryBlock& destData) {
+void NovoxProcessor::getStateInformation(juce::MemoryBlock& destData) {
   juce::MemoryOutputStream(destData, false).writeString(getSongJson());
 }
 
-void NvsProcessor::setStateInformation(const void* data, int sizeInBytes) {
+void NovoxProcessor::setStateInformation(const void* data, int sizeInBytes) {
   juce::MemoryInputStream in(data, static_cast<size_t>(sizeInBytes), false);
   const juce::String json = in.readString();
   if (json.isNotEmpty()) {
@@ -359,6 +359,6 @@ void NvsProcessor::setStateInformation(const void* data, int sizeInBytes) {
   }
 }
 
-juce::AudioProcessorEditor* NvsProcessor::createEditor() { return new NvsEditor(*this); }
+juce::AudioProcessorEditor* NovoxProcessor::createEditor() { return new NovoxEditor(*this); }
 
-juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new NvsProcessor(); }
+juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new NovoxProcessor(); }

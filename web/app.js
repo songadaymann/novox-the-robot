@@ -1,5 +1,5 @@
-// New Virtual Singer web demo. Plain ES module, no dependencies.
-import { createSinger } from "./nvs/index.js";
+// Novox The Robot web demo. Plain ES module, no dependencies.
+import { createSinger } from "./novox/index.js";
 
 const $ = (id) => document.getElementById(id);
 const SAMPLE_RATE = 44100;
@@ -672,7 +672,7 @@ async function boot() {
   chooseVoice("std");
   loadSong(0);
   // expose for tinkering from the console
-  window.nvs = { singer, buildScore, get current() { return current; }, importBytes, sing, stop };
+  window.novox = { singer, buildScore, get current() { return current; }, importBytes, sing, stop };
 }
 function loadSongFields(i) {
   const s = SONGS[i];

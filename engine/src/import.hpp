@@ -11,7 +11,7 @@
 
 #include "score.hpp"
 
-namespace nvs {
+namespace novox {
 
 struct ImportOptions {
   int track = -1;              // MIDI track / MusicXML part index; -1 = first one with notes
@@ -28,4 +28,4 @@ Score importAny(const std::vector<uint8_t>& data, const ImportOptions& opts, std
 // Serializes a score as JSON in the format parseScore reads (seconds-based).
 std::string scoreToJson(const Score& score);
 
-}  // namespace nvs
+}  // namespace novox

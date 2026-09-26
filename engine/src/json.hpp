@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace nvs::json {
+namespace novox::json {
 
 struct Value {
   enum class Type { Null, Bool, Number, String, Array, Object };
@@ -232,4 +232,4 @@ class Parser {
 
 inline Value parse(const std::string& text) { return Parser(text).parse(); }
 
-}  // namespace nvs::json
+}  // namespace novox::json

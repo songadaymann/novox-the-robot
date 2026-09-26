@@ -1,17 +1,17 @@
-// New Virtual Singer for JavaScript (browser, worker, Node). The engine is the
+// Novox The Robot for JavaScript (browser, worker, Node). The engine is the
 // same C++ core, compiled to WebAssembly.
 //
-//   import { createSinger } from "new-virtual-singer";
+//   import { createSinger } from "novox";
 //   const singer = await createSinger({ sampleRate: 48000 });
 //   const audio = singer.render({ tempo: 100, lyrics: "hel-lo world", notes: ["C4 1", "E4 1", "G4 2"] });
 //   // audio: Float32Array of mono samples at singer.sampleRate
 
-import createNvsModule from "./nvs_wasm.js";
+import createNovoxModule from "./novox_wasm.js";
 
-export class NvsError extends Error {}
+export class NovoxError extends Error {}
 
 export async function createSinger({ sampleRate = 48000, moduleOptions = {} } = {}) {
-  const Module = await createNvsModule(moduleOptions);
+  const Module = await createNovoxModule(moduleOptions);
   return new Singer(Module, sampleRate);
 }
 
@@ -19,17 +19,17 @@ export class Singer {
   constructor(Module, sampleRate) {
     this.M = Module;
     this.sampleRate = sampleRate;
-    this.engine = Module._nvs_create(sampleRate);
+    this.engine = Module._novox_create(sampleRate);
   }
 
   destroy() {
-    if (this.engine) this.M._nvs_destroy(this.engine);
+    if (this.engine) this.M._novox_destroy(this.engine);
     this.engine = 0;
   }
 
   // --- internals ------------------------------------------------------------
   _error() {
-    return this.M.UTF8ToString(this.M._nvs_last_error(this.engine));
+    return this.M.UTF8ToString(this.M._novox_last_error(this.engine));
   }
   _withString(text, fn) {
     const ptr = this.M.stringToNewUTF8(text);
@@ -40,11 +40,11 @@ export class Singer {
     }
   }
   _takeString(ptr) {
-    if (!ptr) throw new NvsError(this._error());
+    if (!ptr) throw new NovoxError(this._error());
     try {
       return this.M.UTF8ToString(ptr);
     } finally {
-      this.M._nvs_free(ptr);
+      this.M._novox_free(ptr);
     }
   }
   static _scoreText(score) {
@@ -57,12 +57,12 @@ export class Singer {
     const M = this.M;
     const out = M._malloc(8);  // float* + size_t (wasm32: 4 bytes each)
     try {
-      const rc = this._withString(Singer._scoreText(score), (s) => M._nvs_render(this.engine, s, out, out + 4));
-      if (rc !== 0) throw new NvsError(this._error());
+      const rc = this._withString(Singer._scoreText(score), (s) => M._novox_render(this.engine, s, out, out + 4));
+      if (rc !== 0) throw new NovoxError(this._error());
       const ptr = M.HEAPU32[out >> 2];
       const count = M.HEAPU32[(out + 4) >> 2];
       const audio = new Float32Array(M.HEAPF32.buffer, ptr, count).slice();
-      M._nvs_free(ptr);
+      M._novox_free(ptr);
       return audio;
     } finally {
       M._free(out);
@@ -71,22 +71,22 @@ export class Singer {
 
   /** The syllables and phoneme segments the engine would sing. */
   plan(score) {
-    return JSON.parse(this._takeString(this._withString(Singer._scoreText(score), (s) => this.M._nvs_plan(this.engine, s))));
+    return JSON.parse(this._takeString(this._withString(Singer._scoreText(score), (s) => this.M._novox_plan(this.engine, s))));
   }
 
   /** "HH AX L OW | W ER L D" */
   phonemize(text) {
-    return this._takeString(this._withString(text, (s) => this.M._nvs_phonemize(this.engine, s)));
+    return this._takeString(this._withString(text, (s) => this.M._novox_phonemize(this.engine, s)));
   }
 
   voices() {
-    return this._takeString(this.M._nvs_voice_names()).split(",");
+    return this._takeString(this.M._novox_voice_names()).split(",");
   }
 
   /** Add a pronunciation, e.g. addWord("hugh", "HH Y UW1"). */
   addWord(word, arpabet) {
-    const rc = this._withString(word, (w) => this._withString(arpabet, (a) => this.M._nvs_add_word(this.engine, w, a)));
-    if (rc !== 0) throw new NvsError(this._error());
+    const rc = this._withString(word, (w) => this._withString(arpabet, (a) => this.M._novox_add_word(this.engine, w, a)));
+    if (rc !== 0) throw new NovoxError(this._error());
   }
 
   /** MIDI or MusicXML bytes (Uint8Array / ArrayBuffer) -> score object. */
@@ -97,7 +97,7 @@ export class Singer {
     try {
       M.HEAPU8.set(data, buf);
       const opts = JSON.stringify({ lyrics, track, ...(voice ? { voice } : {}) });
-      const json = this._takeString(this._withString(opts, (o) => M._nvs_import(this.engine, buf, data.length, o)));
+      const json = this._takeString(this._withString(opts, (o) => M._novox_import(this.engine, buf, data.length, o)));
       return JSON.parse(json);
     } finally {
       M._free(buf);
@@ -106,8 +106,8 @@ export class Singer {
 
   /** Incremental renderer (for AudioWorklets and live playback). */
   stream(score) {
-    const ptr = this._withString(Singer._scoreText(score), (s) => this.M._nvs_stream_create(this.engine, s));
-    if (!ptr) throw new NvsError(this._error());
+    const ptr = this._withString(Singer._scoreText(score), (s) => this.M._novox_stream_create(this.engine, s));
+    if (!ptr) throw new NovoxError(this._error());
     return new Stream(this.M, ptr);
   }
 
@@ -133,11 +133,11 @@ export class Stream {
     this.buf = 0;
     this.bufFrames = 0;
   }
-  get length() { return this.M._nvs_stream_length(this.ptr) >>> 0; }
-  get position() { return this.M._nvs_stream_position(this.ptr) >>> 0; }
+  get length() { return this.M._novox_stream_length(this.ptr) >>> 0; }
+  get position() { return this.M._novox_stream_position(this.ptr) >>> 0; }
   /** Seconds of pre-roll before score time 0. */
-  get lead() { return this.M._nvs_stream_lead(this.ptr); }
-  seek(sample) { this.M._nvs_stream_seek(this.ptr, sample); }
+  get lead() { return this.M._novox_stream_lead(this.ptr); }
+  seek(sample) { this.M._novox_stream_seek(this.ptr, sample); }
   /** Next `frames` samples as a Float32Array (a copy). */
   process(frames) {
     if (frames > this.bufFrames) {
@@ -145,12 +145,12 @@ export class Stream {
       this.buf = this.M._malloc(frames * 4);
       this.bufFrames = frames;
     }
-    this.M._nvs_stream_process(this.ptr, this.buf, frames);
+    this.M._novox_stream_process(this.ptr, this.buf, frames);
     return new Float32Array(this.M.HEAPF32.buffer, this.buf, frames).slice();
   }
   destroy() {
     if (this.buf) this.M._free(this.buf);
-    if (this.ptr) this.M._nvs_stream_destroy(this.ptr);
+    if (this.ptr) this.M._novox_stream_destroy(this.ptr);
     this.ptr = this.buf = 0;
   }
 }

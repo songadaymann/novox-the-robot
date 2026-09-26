@@ -7,7 +7,7 @@
 #include <cmath>
 #include <memory>
 
-namespace nvs {
+namespace novox {
 
 namespace {
 
@@ -525,4 +525,4 @@ std::vector<float> renderPlan(const Plan& plan, const Voice& voice, const Render
   return out;
 }
 
-}  // namespace nvs
+}  // namespace novox

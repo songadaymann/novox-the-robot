@@ -6,7 +6,7 @@
 
 #include "phonemes.hpp"
 
-namespace nvs {
+namespace novox {
 
 bool isVowelSymbol(const std::string& s) {
   const Phoneme* p = findPhoneme(s);
@@ -76,7 +76,7 @@ int Lexicon::loadCmudictText(const std::string& text) {
   return count;
 }
 
-#ifdef NVS_EMBEDDED_DICT
+#ifdef NOVOX_EMBEDDED_DICT
 extern const char* const kCmudictChunks[];
 extern const size_t kCmudictChunkCount;
 int Lexicon::loadEmbedded() {
@@ -217,4 +217,4 @@ Pronunciation guessPronunciation(const std::string& raw) {
   return p;
 }
 
-}  // namespace nvs
+}  // namespace novox

@@ -24,7 +24,7 @@ import jiwer  # noqa: E402
 import mlx_whisper  # noqa: E402
 import numpy as np  # noqa: E402
 
-import nvs  # noqa: E402
+import novox  # noqa: E402
 
 # Harvard sentences (IEEE 1969, public domain): phonetically balanced test material.
 SENTENCES = [
@@ -50,11 +50,11 @@ ROOTS = {"bass": 45, "male": 50, "std": 50, "robot": 50, "tenor": 55, "crooner":
          "female": 60, "alto": 57, "soprano": 65, "kid": 62}
 
 
-def count_syllables(singer: nvs.Singer, text: str) -> int:
+def count_syllables(singer: novox.Singer, text: str) -> int:
     return sum(1 for sym in singer.phonemize(text).split() if sym in VOWELS)
 
 
-def make_score(singer: nvs.Singer, text: str, voice: str, beat: float) -> dict:
+def make_score(singer: novox.Singer, text: str, voice: str, beat: float) -> dict:
     root = ROOTS.get(voice, 55)
     n = count_syllables(singer, text)
     notes = [f"{root + MELODY[i % len(MELODY)]} {beat}" for i in range(n)]
@@ -88,7 +88,7 @@ def main() -> int:
     args = ap.parse_args()
 
     sr = 48000
-    singer = nvs.Singer(sample_rate=sr)
+    singer = novox.Singer(sample_rate=sr)
     sentences = SENTENCES[: args.limit] if args.limit else SENTENCES
     report = {"model": args.model, "beat": args.beat, "voices": {}}
     outdir = ROOT / "out" / "intel"

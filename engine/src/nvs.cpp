@@ -26,23 +26,24 @@ char* dupString(const std::string& s) {
   return out;
 }
 
-// Parses a score and applies its dictionary entries to a copy of the lexicon,
-// so per-song pronunciations don't leak into the engine.
-bool prepare(nvs_engine* e, const char* json, nvs::Score& score, nvs::Lexicon& lex) {
+// Parses a score. Returns the lexicon to use: the engine's own, or (only when
+// the score adds pronunciations) a per-song copy held in `local`.
+const nvs::Lexicon* prepare(nvs_engine* e, const char* json, nvs::Score& score, nvs::Lexicon& local) {
   try {
     score = nvs::parseScore(nvs::json::parse(json ? json : ""));
   } catch (const std::exception& ex) {
     e->error = ex.what();
-    return false;
+    return nullptr;
   }
-  lex = e->lexicon;
+  if (score.dictionary.empty()) return &e->lexicon;
+  local = e->lexicon;
   for (const auto& [word, pron] : score.dictionary) {
-    if (!lex.addWord(word, pron)) {
+    if (!local.addWord(word, pron)) {
       e->error = "bad dictionary entry for '" + word + "': " + pron;
-      return false;
+      return nullptr;
     }
   }
-  return true;
+  return &local;
 }
 
 }  // namespace
@@ -57,6 +58,10 @@ nvs_engine* nvs_create(double sample_rate) {
 }
 
 void nvs_destroy(nvs_engine* e) { delete e; }
+
+void nvs_set_sample_rate(nvs_engine* e, double sample_rate) {
+  if (sample_rate > 0) e->sampleRate = sample_rate;
+}
 
 int nvs_load_dictionary(nvs_engine* e, const char* path) {
   int n = e->lexicon.loadCmudict(path ? path : "");
@@ -77,9 +82,10 @@ int nvs_render(nvs_engine* e, const char* score_json, float** out_samples, size_
   *out_samples = nullptr;
   *out_count = 0;
   nvs::Score score;
-  nvs::Lexicon lex;
-  if (!prepare(e, score_json, score, lex)) return -1;
-  nvs::Plan plan = nvs::planScore(score, lex);
+  nvs::Lexicon local;
+  const nvs::Lexicon* lex = prepare(e, score_json, score, local);
+  if (!lex) return -1;
+  nvs::Plan plan = nvs::planScore(score, *lex);
   nvs::RenderOptions opts;
   opts.sampleRate = e->sampleRate;
   std::vector<float> audio = nvs::renderPlan(plan, score.voice, opts);
@@ -96,9 +102,10 @@ int nvs_render(nvs_engine* e, const char* score_json, float** out_samples, size_
 
 char* nvs_plan(nvs_engine* e, const char* score_json) {
   nvs::Score score;
-  nvs::Lexicon lex;
-  if (!prepare(e, score_json, score, lex)) return nullptr;
-  return dupString(nvs::planToJson(nvs::planScore(score, lex)));
+  nvs::Lexicon local;
+  const nvs::Lexicon* lex = prepare(e, score_json, score, local);
+  if (!lex) return nullptr;
+  return dupString(nvs::planToJson(nvs::planScore(score, *lex)));
 }
 
 char* nvs_import(nvs_engine* e, const void* data, size_t size, const char* options_json) {
@@ -164,9 +171,10 @@ struct nvs_stream {
 
 nvs_stream* nvs_stream_create(nvs_engine* e, const char* score_json) {
   nvs::Score score;
-  nvs::Lexicon lex;
-  if (!prepare(e, score_json, score, lex)) return nullptr;
-  nvs::Plan plan = nvs::planScore(score, lex);
+  nvs::Lexicon local;
+  const nvs::Lexicon* lex = prepare(e, score_json, score, local);
+  if (!lex) return nullptr;
+  nvs::Plan plan = nvs::planScore(score, *lex);
   return new nvs_stream{nvs::Stream(std::move(plan), score.voice, e->sampleRate)};
 }
 

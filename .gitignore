@@ -6,3 +6,4 @@ __pycache__/
 reference/
 build-wasm/
 web/nvs/
+build-plugin/

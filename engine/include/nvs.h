@@ -27,6 +27,9 @@ typedef struct nvs_engine nvs_engine;
 NVS_API nvs_engine* nvs_create(double sample_rate);
 NVS_API void nvs_destroy(nvs_engine* engine);
 
+/* Changes the sample rate used by later renders and streams. */
+NVS_API void nvs_set_sample_rate(nvs_engine* engine, double sample_rate);
+
 /* Loads a CMU-format pronouncing dictionary. Returns entries loaded, or -1. */
 NVS_API int nvs_load_dictionary(nvs_engine* engine, const char* path);
 

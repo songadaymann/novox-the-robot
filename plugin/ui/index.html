@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>New Virtual Singer</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app" id="app">
+  <header class="toolbar">
+    <button class="gel white rec" id="capture" title="Capture: while armed and the transport plays, notes from your MIDI keyboard are added to the song">
+      <span class="led" aria-hidden="true"></span><span class="lbl">Capture</span>
+    </button>
+
+    <div class="transport" id="transport">
+      <button class="gel play" id="play" title="Play from the start (Space)"><span class="ico" id="playIco">&#9654;</span><span id="playLbl">Play</span></button>
+      <label class="tempo" title="Tempo (beats per minute)"><span class="q" aria-hidden="true">&#9833;=</span><input id="tempo" class="field num" type="number" min="30" max="300" step="1" value="120" aria-label="Tempo"></label>
+    </div>
+
+    <div class="lcd" id="lcd" aria-live="polite">
+      <div class="lcd-row"><b id="lcdState">LOADING…</b><span id="lcdPos">1.1.1</span></div>
+      <div class="lcd-row sub"><span id="lcdLine">warming up the vocal cords</span></div>
+    </div>
+
+    <div class="filebtns">
+      <label class="gel white" id="importBtn" tabindex="0" title="Import a MIDI or MusicXML file (replaces the notes)">Import&#8230;<input type="file" id="file" accept=".mid,.midi,.xml,.musicxml,.mxl,audio/midi" hidden></label>
+      <button class="gel white" id="clear" title="Remove all notes (lyrics stay; undo with &#8984;Z)">Clear</button>
+    </div>
+
+    <button class="voicechip" id="voiceChip" aria-expanded="true" aria-controls="voicePanel" title="Show or hide the voice panel">
+      <span class="ava" id="chipFace"></span><span class="vc-name" id="chipName">Std Voice</span><span class="chev" aria-hidden="true">&#9656;</span>
+    </button>
+  </header>
+
+  <div class="body">
+    <main class="main">
+      <section class="roll" id="roll">
+        <div class="corner" id="corner" title="Snap / beats"></div>
+        <canvas id="ruler" class="ruler" aria-hidden="true"></canvas>
+        <canvas id="keys" class="keys" aria-label="Keyboard: click a key to highlight its row"></canvas>
+        <div class="gridwrap" id="gridwrap">
+          <canvas id="grid" class="grid" aria-hidden="true"></canvas>
+          <div class="scroller" id="scroller" tabindex="0" aria-label="Piano roll. Drag to draw notes."><div class="sizer" id="sizer"></div></div>
+          <input class="lyricedit" id="lyricEdit" type="text" spellcheck="false" placeholder="own lyric" hidden>
+        </div>
+      </section>
+
+      <div class="rollbar">
+        <span class="info" id="info"></span>
+        <span class="grow"></span>
+        <label class="snaplbl" for="snap">Snap</label>
+        <select id="snap" class="popup" title="Grid for drawing, moving and nudging">
+          <option value="1">1/4</option>
+          <option value="0.5">1/8</option>
+          <option value="0.25" selected>1/16</option>
+          <option value="0.125">1/32</option>
+          <option value="0">Off</option>
+        </select>
+        <div class="seg zoom" role="group" aria-label="Zoom">
+          <button id="zoomOut" title="Zoom out (&#8984; + scroll)">&minus;</button>
+          <button id="zoomFit" title="Fit the song">Fit</button>
+          <button id="zoomIn" title="Zoom in (&#8984; + scroll)">+</button>
+        </div>
+      </div>
+
+      <section class="box lyricsbox">
+        <h3>Lyrics</h3>
+        <textarea id="lyrics" rows="2" spellcheck="false" aria-label="Lyrics" placeholder="Type the words here. They flow onto the notes in order."></textarea>
+        <div class="lyfoot">
+          <span class="counts" id="counts"></span>
+          <span class="warn" id="warn" hidden></span>
+          <span class="grow"></span>
+          <span class="hint"><code>hel-lo</code> splits &middot; <code>_</code> holds a vowel &middot; spare notes hum</span>
+        </div>
+      </section>
+    </main>
+
+    <aside class="voicepanel" id="voicePanel" aria-label="Voice">
+      <div class="singer">
+        <div class="bigface" id="bigface"></div>
+        <div class="who">
+          <div class="vname" id="vname">Std Voice</div>
+          <div class="vsub" id="vsub"></div>
+        </div>
+      </div>
+      <div class="gallery" id="gallery" role="radiogroup" aria-label="Voice preset"></div>
+      <section class="box tweak">
+        <h3>Tweak</h3>
+        <div id="sliders"></div>
+        <div class="tweakfoot"><span id="modified">Preset settings</span><button class="gel white small" id="reset">Reset</button></div>
+      </section>
+    </aside>
+  </div>
+
+  <footer class="status">
+    <span id="mode">Connecting&#8230;</span>
+    <span class="sep">|</span>
+    <span class="keyshelp">Drag to draw &middot; double-click a note for its own lyric &middot; &#8997;-drag copies &middot; &#8984;Z undo</span>
+    <span class="grow" aria-hidden="true"></span>
+  </footer>
+
+  <div class="dropveil" id="dropveil"><div>Drop a MIDI or MusicXML file to import it</div></div>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

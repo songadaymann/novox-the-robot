@@ -77,6 +77,25 @@ render. Output is at a fixed level with a soft clip, and each voice is loudness-
 std voice (averaged over vowels and pitches), so presets sit within a few dB of each other. Onset consonants start
 before the beat, so audio begins `nvs_stream_lead()` seconds before score time 0.
 
+## Plugin (AU / VST3) and standalone app
+
+```bash
+cmake -S . -B build-plugin -DCMAKE_BUILD_TYPE=Release -DNVS_BUILD_PLUGIN=ON   # downloads JUCE 8
+cmake --build build-plugin -j --target NewVirtualSinger_All
+# installs to ~/Library/Audio/Plug-Ins/{Components,VST3}; the app is in
+# build-plugin/plugin/NewVirtualSinger_artefacts/Release/Standalone/
+build-plugin/plugin/NvsPluginTests_artefacts/Release/NvsPluginTests   # headless transport tests
+```
+
+How it works in a DAW: add it as an instrument. The plugin keeps its own song (notes in beats,
+lyrics, voice) and saves it with the project. It renders the whole song in the background whenever
+you edit it or the tempo changes, and plays the right part for wherever the playhead is, so looping
+and scrubbing are sample-accurate and consonants land before the beat without added latency.
+Arm **Capture** and play a MIDI keyboard (or play a MIDI region into it) while the transport runs to
+record notes into the song. The standalone app has its own play/stop and tempo.
+
+The plugin is AGPLv3 (JUCE's open-source license); the engine it links stays MIT.
+
 ## Layout
 
 | Path | What |
@@ -87,6 +106,8 @@ before the beat, so audio begins `nvs_stream_lead()` seconds before score time 0
 | `bindings/python/` | ctypes binding |
 | `tools/intelligibility.py` | Sings test sentences, transcribes with Whisper (local, free), reports word error rate |
 | `tools/spectrogram.py` | Spectrogram PNG of a render |
+| `plugin/` | JUCE plugin + standalone app (AGPLv3): processor, WebView editor, `ui/` (HTML/JS), tests |
+| `bindings/js/`, `web/` | WebAssembly npm package; Aqua browser demo |
 | `mockups/` | Four plugin UI directions (open `mockups/index.html`) |
 | `scores/` | Example scores |
 | `data/cmudict.dict` | CMU Pronouncing Dictionary (BSD-style license, see `data/cmudict.LICENSE`) |

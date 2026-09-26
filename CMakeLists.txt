@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(NewVirtualSinger VERSION 0.1.0 LANGUAGES CXX)
+project(NewVirtualSinger VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -83,9 +83,15 @@ if(NVS_BUILD_TESTS)
   add_test(NAME engine COMMAND nvs_tests)
 endif()
 
+# DAW plugin + standalone app (JUCE, AGPLv3). Off by default: it downloads JUCE.
+option(NVS_BUILD_PLUGIN "Build the AU/VST3/Standalone plugin (fetches JUCE)" OFF)
+if(NVS_BUILD_PLUGIN)
+  add_subdirectory(plugin)
+endif()
+
 # WebAssembly module for the JavaScript package (emcmake cmake -B build-wasm ...).
 if(EMSCRIPTEN)
-  set(NVS_WASM_EXPORTS "_nvs_create,_nvs_destroy,_nvs_load_dictionary,_nvs_add_word,_nvs_render,_nvs_plan,_nvs_import,_nvs_phonemize,_nvs_voice_names,_nvs_stream_create,_nvs_stream_destroy,_nvs_stream_length,_nvs_stream_position,_nvs_stream_lead,_nvs_stream_seek,_nvs_stream_process,_nvs_last_error,_nvs_free,_malloc,_free")
+  set(NVS_WASM_EXPORTS "_nvs_create,_nvs_destroy,_nvs_set_sample_rate,_nvs_load_dictionary,_nvs_add_word,_nvs_render,_nvs_plan,_nvs_import,_nvs_phonemize,_nvs_voice_names,_nvs_stream_create,_nvs_stream_destroy,_nvs_stream_length,_nvs_stream_position,_nvs_stream_lead,_nvs_stream_seek,_nvs_stream_process,_nvs_last_error,_nvs_free,_malloc,_free")
   add_executable(nvs_wasm $<TARGET_OBJECTS:nvs_objects>)
   set_target_properties(nvs_wasm PROPERTIES OUTPUT_NAME nvs_wasm SUFFIX ".js")
   target_link_options(nvs_wasm PRIVATE

@@ -1185,11 +1185,31 @@ songaday.studio/plugins" (status `version`).
 **Docs.** README has a Download section. The license page bundles the MIT and CMU notices.
 HOSTS.md marks Pro Tools as not released. `build-release/` is gitignored.
 
-**Not done (needs Jonathan):**
-- commit, create the public repo, a GitHub release with the pkg, and deploy the site;
-- the full AGPLv3 text (download from gnu.org; plugin/LICENSE.md is only a pointer);
-- where the robot art came from (ASSETS.md says "To confirm");
-- signing.
+**Published (same day, with Jonathan's go-ahead):**
+- **Code:** commit e1c969a, pushed to the new public repo
+  https://github.com/songadaymann/novox-the-robot.
+- **Release:** v1.0.0-beta.1, "Novox The Robot 1.0 beta", with the pkg and SHA256SUMS. It is
+  deliberately not a pre-release: `releases/latest/download/...` skips pre-releases, and the
+  download page relies on that link. The link resolves to the 20,109,881-byte pkg.
+- **Site:** commit 21707fa in songaday-studios, deployed with `wrangler deploy`. /plugins, its
+  images and the home page all answer 200.
+- **License:** the full AGPLv3 (gnu.org agpl-3.0.txt) is in `plugin/LICENSE-AGPL-3.0.txt` and on
+  the installer's license page.
+- **Art:** Jonathan made it with AI assistance (Claude), CC BY 4.0, recorded in ASSETS.md.
+- **Test fix:** NoteLyricsTests now defaults to tools/.venv/bin/python.
+
+**Still open:**
+- Signing and notarization, once Jonathan's Apple Developer account exists
+  (`packaging/macos/README.md`). Then rebuild, replace the release asset, and delete the
+  `data-unsigned` note on the page.
+- A test install on a Mac (or macOS user) without the dev plugins in ~/Library.
+
+**Next release:**
+1. Bump `project(... VERSION)` and `NOVOX_VERSION_LABEL`.
+2. Run `scripts/package-mac.sh`.
+3. `gh release create vX.Y.Z out/release/Novox-The-Robot-macOS.pkg out/release/SHA256SUMS`
+   (keep that asset name).
+4. Update the version line in songaday-studios/plugins/index.html and redeploy.
 
 Changes made this morning (10:17-11:50) by someone else are in the release build:
 - melody clipboard, `plugin/ui/melody-clipboard.js`;

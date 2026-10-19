@@ -8,30 +8,99 @@
 </head>
 <body>
 <div class="app" id="app">
-  <header class="toolbar">
-    <button class="gel white rec" id="capture" title="Capture: while armed and the transport plays, notes from your MIDI keyboard are added to the song">
-      <span class="led" aria-hidden="true"></span><span class="lbl">Capture</span>
-    </button>
+  <!-- Top bar: the song file on the left, the LCD in the middle, transport on the right. -->
+  <header class="topbar">
+    <div class="filegroup" role="group" aria-label="Song file">
+      <div class="seg docseg">
+        <button data-file-action="open" title="Open a song (.novox)">Open</button>
+        <button data-file-action="save" title="Save the song">Save</button>
+        <button data-file-action="saveAs" title="Save the song under a new name">Save As&#8230;</button>
+      </div>
 
-    <div class="transport" id="transport">
-      <button class="gel play" id="play" title="Play from the start (Space)"><span class="ico" id="playIco">&#9654;</span><span id="playLbl">Play</span></button>
-      <label class="tempo" title="Tempo (beats per minute)"><span class="q" aria-hidden="true">&#9833;=</span><input id="tempo" class="field num" type="number" min="30" max="300" step="1" value="120" aria-label="Tempo"></label>
+      <div class="importgroup">
+        <label class="gel white" id="importBtn" tabindex="0" title="Import a recording, MIDI or MusicXML (or drop a file anywhere)">Import&#8230;<input type="file" id="file" accept=".wav,.mp3,.aif,.aiff,.m4a,.flac,.ogg,.mid,.midi,.xml,.musicxml,.mxl,audio/*" hidden></label>
+        <div class="importopts">
+          <label class="importopt" title="Add to song: a recording, region or singing take you import joins the song at its place on the timeline (one without a position goes to the playhead) and replaces only the notes within its length, so you can bring regions in one by one. Off: an import replaces the whole song. MIDI and MusicXML files always replace the song."><input type="checkbox" id="addToSong" checked><span>Add to song</span></label>
+          <label class="importopt" title="Detailed notes: also give scoops, grace notes and quick pitch steps their own notes, as a note-by-note transcription would. Off: one note per sung syllable. Applies to the next audio import or singing take."><input type="checkbox" id="detailedNotes"><span>Detailed notes</span></label>
+          <label class="importopt" title="Snap to grid: an audio import or singing take lands on the editor's grid (the Snap setting, 1/16 by default): starts and ends on its lines, two quick syllables on neighbouring lines. One Undo returns the notes as sung. Off: as sung."><input type="checkbox" id="snapImport" checked><span>Snap to grid</span></label>
+        </div>
+      </div>
+
+      <div class="popwrap">
+        <button class="gel white menubtn" data-pop="exportPop" aria-haspopup="true">Export</button>
+        <div class="pop down" id="exportPop" hidden>
+          <button class="mi" data-file-action="wav" data-close>Export WAV&#8230;<small>The sung vocal as audio</small></button>
+          <button class="mi" data-file-action="midi" data-close>Export MIDI&#8230;<small>The notes, with lyrics</small></button>
+          <div class="mi-drag narrow-only">
+            <span class="poplbl">Hold and drag into your DAW</span>
+            <div class="dragpair">
+              <button class="dragtoken" data-file-action="dragWav" title="Hold and drag the sung audio into Logic"><svg class="doc" width="12" height="15" viewBox="0 0 12 15" aria-hidden="true"><path d="M.5.5h7l4 4v10H.5z" fill="#fff" stroke="#666"/><path d="M7.5.5v4h4" fill="#e6e6e6" stroke="#666"/><path d="M2 9.5h1l1-3 1.2 6 1.3-7 1.2 5 .8-1H10" fill="none" stroke="#2f7fe0" stroke-width="1.1" stroke-linejoin="round"/></svg>WAV</button>
+              <button class="dragtoken" data-file-action="dragMidi" title="Hold and drag the notes into Logic"><svg class="doc" width="12" height="15" viewBox="0 0 12 15" aria-hidden="true"><path d="M.5.5h7l4 4v10H.5z" fill="#fff" stroke="#666"/><path d="M7.5.5v4h4" fill="#e6e6e6" stroke="#666"/><path d="M2 7h3M4 9.5h3.5M6.5 12h3" stroke="#2a9a45" stroke-width="1.6"/></svg>MIDI</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dragpair wide-only" role="group" aria-label="Drag into your DAW">
+        <button class="dragtoken" data-file-action="dragWav" title="Hold and drag the sung audio into Logic"><svg class="doc" width="12" height="15" viewBox="0 0 12 15" aria-hidden="true"><path d="M.5.5h7l4 4v10H.5z" fill="#fff" stroke="#666"/><path d="M7.5.5v4h4" fill="#e6e6e6" stroke="#666"/><path d="M2 9.5h1l1-3 1.2 6 1.3-7 1.2 5 .8-1H10" fill="none" stroke="#2f7fe0" stroke-width="1.1" stroke-linejoin="round"/></svg>WAV</button>
+        <button class="dragtoken" data-file-action="dragMidi" title="Hold and drag the notes into Logic"><svg class="doc" width="12" height="15" viewBox="0 0 12 15" aria-hidden="true"><path d="M.5.5h7l4 4v10H.5z" fill="#fff" stroke="#666"/><path d="M7.5.5v4h4" fill="#e6e6e6" stroke="#666"/><path d="M2 7h3M4 9.5h3.5M6.5 12h3" stroke="#2a9a45" stroke-width="1.6"/></svg>MIDI</button>
+      </div>
     </div>
 
     <div class="lcd" id="lcd" aria-live="polite">
       <div class="lcd-row"><b id="lcdState">LOADING…</b><span id="lcdPos">1.1.1</span></div>
-      <div class="lcd-row sub"><span id="lcdLine">warming up the vocal cords</span></div>
+      <div class="lcd-row sub"><span id="lcdLine">warming up the vocal cords</span><label class="tempo" title="Tempo in beats per minute: click to type a new one"><span class="q" aria-hidden="true">&#9833;=</span><input id="tempo" type="number" min="30" max="300" step="1" value="120" aria-label="Tempo"></label></div>
     </div>
 
-    <div class="filebtns">
-      <label class="gel white" id="importBtn" tabindex="0" title="Import a MIDI or MusicXML file (replaces the notes)">Import&#8230;<input type="file" id="file" accept=".mid,.midi,.xml,.musicxml,.mxl,audio/midi" hidden></label>
-      <button class="gel white" id="clear" title="Remove all notes (lyrics stay; undo with &#8984;Z)">Clear</button>
+    <div class="transportgroup">
+      <div class="recpair" role="group" aria-label="Record">
+        <button class="gel white rec" id="capture" aria-label="Record notes from a MIDI keyboard" aria-describedby="captureHelp" title="Record notes from a MIDI keyboard">
+          <svg class="keyboard-icon" width="24" height="16" viewBox="0 0 28 18" aria-hidden="true">
+            <rect x="1" y="1" width="26" height="16" fill="#fff" stroke="#222"/>
+            <path d="M5 1v16M9 1v16M13 1v16M17 1v16M21 1v16M25 1v16" stroke="#222"/>
+            <path d="M4 1h2v9H4zM8 1h2v9H8zM16 1h2v9h-2zM20 1h2v9h-2zM24 1h2v9h-2z" fill="#222"/>
+          </svg>
+        </button>
+        <button class="gel white rec" id="singCapture" aria-label="Record singing" aria-pressed="false" title="Sing into your microphone, then convert into notes and lyrics">
+          <svg width="24" height="19" viewBox="0 0 28 22" aria-hidden="true">
+            <circle cx="10" cy="8" r="6" fill="#fff" stroke="#222"/>
+            <circle cx="8" cy="6" r="1" fill="#222"/><ellipse cx="12" cy="10" rx="2" ry="3" fill="#222"/>
+            <path d="M2 21c0-7 16-7 16 0M22 13V3l5-1v8" fill="none" stroke="#222" stroke-width="2"/>
+            <ellipse cx="20" cy="13" rx="3" ry="2" fill="#222"/><ellipse cx="25" cy="10" rx="3" ry="2" fill="#222"/>
+          </svg>
+        </button>
+      </div>
+      <div class="transport" id="transport">
+        <button class="gel play" id="play" title="Play from the start (Space)"><span class="ico" id="playIco">&#9654;</span><span id="playLbl">Play</span></button>
+      </div>
     </div>
-
-    <button class="voicechip" id="voiceChip" aria-expanded="true" aria-controls="voicePanel" title="Show or hide the voice panel">
-      <span class="ava" id="chipFace"></span><span class="vc-name" id="chipName">Std Voice</span><span class="chev" aria-hidden="true">&#9656;</span>
-    </button>
   </header>
+
+  <!-- The stage: who is singing, and the whole cast one click away. -->
+  <section class="stage" aria-label="Singer">
+    <div class="spot">
+      <div class="bigface" id="bigface"></div>
+      <div class="who">
+        <div class="vname" id="vname">Std Voice</div>
+        <div class="vsub" id="vsub"></div>
+        <div class="popwrap">
+          <button class="gel white small menubtn" id="tweakBtn" data-pop="tweakPop" aria-haspopup="dialog" title="Formant, vibrato, glide, breath, grit and choir for this singer">Tweak</button>
+          <div class="pop down tweakpop" id="tweakPop" hidden role="dialog" aria-label="Tweak the voice">
+            <div class="poptitle">Tweak the voice <span>double-click a slider to undo it</span></div>
+            <div id="sliders"></div>
+            <div class="tweakfoot"><span id="modified">Preset settings</span><button class="gel white small" id="reset">Reset</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="gallery" id="gallery" role="radiogroup" aria-label="Singer"></div>
+  </section>
+
+  <div id="captureHelp" class="capture-help" role="status" hidden></div>
+  <div id="singHelp" class="capture-help" role="status" hidden>
+    <span id="singMessage"></span> <meter id="singLevel" min="0" max="0.2" value="0" aria-label="Microphone level"></meter>
+    <button class="gel white small" id="singCancel">Cancel</button>
+  </div>
 
   <div class="body">
     <main class="main">
@@ -42,65 +111,128 @@
         <div class="gridwrap" id="gridwrap">
           <canvas id="grid" class="grid" aria-hidden="true"></canvas>
           <div class="scroller" id="scroller" tabindex="0" aria-label="Piano roll. Drag to draw notes."><div class="sizer" id="sizer"></div></div>
-          <input class="lyricedit" id="lyricEdit" type="text" spellcheck="false" placeholder="own lyric" hidden>
+          <input class="lyricedit" id="lyricEdit" type="text" spellcheck="false" aria-label="Note lyrics" placeholder="word or syllables" hidden>
         </div>
       </section>
-
-      <div class="rollbar">
-        <span class="info" id="info"></span>
-        <span class="grow"></span>
-        <label class="snaplbl" for="snap">Snap</label>
-        <select id="snap" class="popup" title="Grid for drawing, moving and nudging">
-          <option value="1">1/4</option>
-          <option value="0.5">1/8</option>
-          <option value="0.25" selected>1/16</option>
-          <option value="0.125">1/32</option>
-          <option value="0">Off</option>
-        </select>
-        <div class="seg zoom" role="group" aria-label="Zoom">
-          <button id="zoomOut" title="Zoom out (&#8984; + scroll)">&minus;</button>
-          <button id="zoomFit" title="Fit the song">Fit</button>
-          <button id="zoomIn" title="Zoom in (&#8984; + scroll)">+</button>
-        </div>
-      </div>
-
-      <section class="box lyricsbox">
-        <h3>Lyrics</h3>
-        <textarea id="lyrics" rows="2" spellcheck="false" aria-label="Lyrics" placeholder="Type the words here. They flow onto the notes in order."></textarea>
-        <div class="lyfoot">
-          <span class="counts" id="counts"></span>
-          <span class="warn" id="warn" hidden></span>
-          <span class="grow"></span>
-          <span class="hint"><code>hel-lo</code> splits &middot; <code>_</code> holds a vowel &middot; spare notes hum</span>
-        </div>
-      </section>
+      <canvas id="sourceWave" hidden aria-label="Original recording aligned with the piano roll"></canvas>
+      <canvas id="timelineCanvas" hidden tabindex="0" aria-label="Whole timeline. Click or drag to navigate; arrow keys move the view."></canvas>
     </main>
 
-    <aside class="voicepanel" id="voicePanel" aria-label="Voice">
-      <div class="singer">
-        <div class="bigface" id="bigface"></div>
-        <div class="who">
-          <div class="vname" id="vname">Std Voice</div>
-          <div class="vsub" id="vsub"></div>
-        </div>
+    <aside class="lyricscol" aria-label="Lyrics">
+      <div class="lyhead">
+        <label class="lytitle" for="lyrics">Lyrics</label>
+        <span class="counts" id="counts"></span>
       </div>
-      <div class="gallery" id="gallery" role="radiogroup" aria-label="Voice preset"></div>
-      <section class="box tweak">
-        <h3>Tweak</h3>
-        <div id="sliders"></div>
-        <div class="tweakfoot"><span id="modified">Preset settings</span><button class="gel white small" id="reset">Reset</button></div>
-      </section>
+      <textarea id="lyrics" spellcheck="false" aria-label="Lyrics" placeholder="Type the words here, one line per phrase. They flow onto the notes in order."></textarea>
+      <div class="warn" id="warn" hidden></div>
+      <dl class="legend">
+        <dt><code>hel-lo</code></dt><dd>splits a word</dd>
+        <dt><code>_</code></dt><dd>holds a note</dd>
+        <dt><code>~</code></dt><dd>keeps a word on one note</dd>
+      </dl>
     </aside>
   </div>
 
-  <footer class="status">
-    <span id="mode">Connecting&#8230;</span>
-    <span class="sep">|</span>
-    <span class="keyshelp">Drag to draw &middot; double-click a note for its own lyric &middot; &#8997;-drag copies &middot; &#8984;Z undo</span>
-    <span class="grow" aria-hidden="true"></span>
+  <!-- One bottom bar: what's under the pointer, then the editing tools. -->
+  <footer class="bottombar">
+    <span class="info" id="info"></span>
+    <span class="grow"></span>
+
+    <div class="tools" role="toolbar" aria-label="Note tools">
+      <div class="popwrap">
+        <button class="tbtn menubtn" id="keyBtn" data-pop="keyPop" aria-haspopup="dialog" title="Pitch correction to a key">Key: Off</button>
+        <div class="pop up" id="keyPop" hidden role="dialog" aria-label="Pitch correction">
+          <div class="poptitle">Correct pitches to a key</div>
+          <div class="keytools">
+            <select id="keyRoot" class="popup" aria-label="Key"><option value="-1">Off</option><option value="0">C</option><option value="1">C♯</option><option value="2">D</option><option value="3">E♭</option><option value="4">E</option><option value="5">F</option><option value="6">F♯</option><option value="7">G</option><option value="8">A♭</option><option value="9">A</option><option value="10">B♭</option><option value="11">B</option></select>
+            <select id="keyScale" class="popup" aria-label="Scale"><option value="major">Major</option><option value="minor">Minor</option></select>
+            <select id="keyMode" class="popup" aria-label="Correction strength"><option value="gentle">Gentle</option><option value="snap">Snap</option></select>
+          </div>
+          <div class="popfoot"><span class="pophint">Fixes the selected notes, or all of them. Undo puts them back.</span><button class="gel small" id="keyApply" disabled title="Correct selected notes, or all notes if none are selected. Undo restores the original pitches.">Correct</button></div>
+          <label class="importopt keyimport" title="Snap imports to the key: an audio import or singing take also moves its out-of-key notes to the nearest note of this key (each import detects the key and sets it here, unless you chose one). Off by default: real melodies leave the key for some notes (about 1 in 9 in the evaluation songs), and this moves those too. One Undo returns the notes as sung."><input type="checkbox" id="keyImport"><span>Snap imports to this key</span></label>
+        </div>
+      </div>
+
+      <div class="popwrap">
+        <button class="tbtn menubtn" data-pop="editPop" aria-haspopup="true" title="Syllables and notes">Edit</button>
+        <div class="pop up" id="editPop" hidden>
+          <div class="poptitle">Selected notes</div>
+          <button class="mi" id="copyMelody" data-close>Copy melody <span class="shortcut">&#8984;C</span></button>
+          <button class="mi" id="pasteMelody" data-close>Paste melody <span class="shortcut">&#8984;V</span></button>
+          <hr>
+          <button class="mi" id="splitSyllables" data-close>Split syllables&#8230;<small>One note into a note per syllable</small></button>
+          <button class="mi" id="joinSyllables">Join notes<small>Adjacent notes of the same pitch</small></button>
+          <div class="mi-row">
+            <span>Move lyric</span>
+            <div class="seg">
+              <button id="lyricLeft" title="Move the selected note’s lyric to the previous note">&#8592; Earlier</button><button id="lyricRight" title="Move the selected note’s lyric to the next note">Later &#8594;</button>
+            </div>
+          </div>
+          <hr>
+          <button class="mi" id="clear" data-close title="Remove all notes (lyrics stay; undo with &#8984;Z)">Clear all notes<small>Lyrics stay · &#8984;Z brings them back</small></button>
+        </div>
+      </div>
+
+      <div class="popwrap">
+        <button class="tbtn menubtn" data-pop="comparePop" aria-haspopup="dialog" title="Compare the original recording with the robot">Compare</button>
+        <div class="pop up" id="comparePop" hidden role="dialog" aria-label="Phrase comparison">
+          <div class="poptitle">Listen to a phrase</div>
+          <div class="cmp">
+            <div class="seg">
+              <button id="hearOriginal" disabled>Original</button><button id="hearRobot">Robot</button><button id="hearStop">&#9632; Stop</button>
+            </div>
+            <label class="chk"><input id="phraseLoop" type="checkbox"> Loop</label>
+          </div>
+          <div class="pophint" id="phraseRange">Whole song · select notes for a phrase</div>
+        </div>
+      </div>
+    </div>
+
+    <span class="vsep" aria-hidden="true"></span>
+
+    <div class="viewtools">
+      <label class="snaplbl" for="snap">Snap</label>
+      <select id="snap" class="popup" title="Grid for drawing, moving and nudging">
+        <option value="1">1/4</option>
+        <option value="0.5">1/8</option>
+        <option value="0.25" selected>1/16</option>
+        <option value="0.125">1/32</option>
+        <option value="0">Off</option>
+      </select>
+      <div class="seg zoom" role="group" aria-label="Zoom">
+        <button id="zoomOut" title="Zoom out (&#8984; + scroll)">&minus;</button>
+        <button id="zoomFit" title="Fit the song">Fit</button>
+        <button id="zoomIn" title="Zoom in (&#8984; + scroll)">+</button>
+      </div>
+      <div class="popwrap">
+        <button class="tbtn menubtn" data-pop="viewPop" aria-haspopup="dialog" title="Timeline overview and window size">View</button>
+        <div class="pop up right viewpop" id="viewPop" hidden role="dialog" aria-label="View">
+          <button class="mi check" id="timelineToggle" aria-expanded="false" aria-controls="timelineCanvas">Timeline overview<small>The whole song under the roll</small></button>
+          <div class="mi-row">
+            <span>Window</span>
+            <select id="windowSize" class="popup" aria-label="Window size" title="Window size; you can also drag the bottom-right corner">
+              <option value="normal">Normal</option><option value="large">Large</option><option value="largest">Extra large</option>
+            </select>
+          </div>
+          <hr>
+          <div class="about">
+            <div id="mode">Connecting&#8230;</div>
+            <div id="version"></div>
+            <div class="keyshelp">Drag to draw &middot; double-click a note to enter lyrics &middot; &#8984;C / &#8984;V copy / paste &middot; &#8997;-drag copies &middot; &#8984;D duplicates &middot; &#8984;Z undo</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <span class="grip" aria-hidden="true"></span>
   </footer>
 
-  <div class="dropveil" id="dropveil"><div>Drop a MIDI or MusicXML file to import it</div></div>
+  <dialog id="syllableDialog"><form method="dialog"><label>Syllables <input id="syllableText" class="field" placeholder="re-mem-ber" autocomplete="off"></label><div class="dlgbtns"><button class="gel white" value="cancel">Cancel</button><button class="gel" id="applySyllables" value="apply">Split</button></div></form></dialog>
+  <dialog id="pasteDialog" aria-labelledby="pasteTitle" aria-describedby="pasteMessage"><form method="dialog">
+    <h2 id="pasteTitle">Replace overlapping notes?</h2>
+    <p id="pasteMessage"></p>
+    <div class="dlgbtns"><button value="cancel" autofocus>Cancel</button><button value="replace">Replace</button></div>
+  </form></dialog>
+  <div class="dropveil" id="dropveil"><div>Drop a recording, MIDI or MusicXML file</div></div>
 </div>
 <script type="module" src="app.js"></script>
 </body>

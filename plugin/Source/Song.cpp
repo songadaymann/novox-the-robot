@@ -17,7 +17,10 @@ juce::String Song::toJson() const {
   auto* o = new juce::DynamicObject();
   o->setProperty("format", "novox-song");
   o->setProperty("version", 1);
+  if (keyCorrection.isObject()) o->setProperty("keyCorrection", keyCorrection);
+  if (transcriptions.size() > 0) o->setProperty("transcriptions", transcriptions);
   o->setProperty("lyrics", lyrics);
+  o->setProperty("useNoteLyrics", useNoteLyrics);
   o->setProperty("voice", voice);
   if (dictionary.isObject()) o->setProperty("dictionary", dictionary);
   juce::Array<juce::var> arr;
@@ -30,7 +33,13 @@ Song Song::fromJson(const juce::String& json) {
   Song s;
   juce::var v = juce::JSON::parse(json);
   if (!v.isObject()) return s;
+  s.keyCorrection = v.getProperty("keyCorrection", juce::var());
+  const auto records = v.getProperty("transcriptions", juce::var());
+  const auto legacy = v.getProperty("transcription", juce::var());
+  if (records.isArray()) s.transcriptions = records;
+  else if (legacy.isObject()) s.transcriptions = juce::Array<juce::var>{legacy};
   s.lyrics = v.getProperty("lyrics", "").toString();
+  s.useNoteLyrics = static_cast<bool>(v.getProperty("useNoteLyrics", false));
   juce::var voice = v.getProperty("voice", "std");
   if (voice.isString() || voice.isObject()) s.voice = voice;
   juce::var dict = v.getProperty("dictionary", juce::var());
@@ -54,12 +63,22 @@ juce::String Song::toScoreJson(double bpm) const {
   o->setProperty("tempo", bpm);
   o->setProperty("units", "beats");
   o->setProperty("voice", voice);
-  if (lyrics.isNotEmpty()) o->setProperty("lyrics", lyrics);
+  if (!useNoteLyrics && lyrics.isNotEmpty()) o->setProperty("lyrics", lyrics);
   if (dictionary.isObject()) o->setProperty("dictionary", dictionary);
   juce::Array<juce::var> arr;
   for (const auto& n : notes) arr.add(noteToVar(n));
   o->setProperty("notes", arr);
   return juce::JSON::toString(juce::var(o), true);
+}
+
+juce::StringArray Song::recordingIds() const {
+  juce::StringArray ids;
+  if (const auto* records = transcriptions.getArray())
+    for (const auto& record : *records) {
+      const auto id = record.getProperty("recordingId", "").toString();
+      if (id.isNotEmpty()) ids.addIfNotAlreadyThere(id);
+    }
+  return ids;
 }
 
 void Song::sortNotes() {

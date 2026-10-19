@@ -1,3 +1,10 @@
+import { correctedPitch } from "./pitch-correction.js";
+import { detectKey, evidenceFor, quantizeNotes } from "./note-shaping.js";
+import { createAudioImport, importPosition, importSummary } from "./audio-import.js";
+import { labelNotes, lyricsFromNotes, pinnedLyric } from "./lyric-text.js";
+import { applyNoteLyrics } from "./note-lyrics.js";
+import { createMelodyClipboard, parseMelodyClipboard, melodyPasteConflicts, applyMelodyPaste } from "./melody-clipboard.js";
+import { createLiveRangesCache, importSpan, isStarterSong, mergeImport, originalSegments, songTranscriptions } from "./song-merge.js";
 // Novox The Robot plugin editor. Plain ES module, no dependencies.
 //
 // Sections:
@@ -8,6 +15,7 @@
 import { createBackend } from "./backend.js";
 
 const $ = (id) => document.getElementById(id);
+const visibleSourceRanges = createLiveRangesCache();
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const r6 = (x) => Math.round(x * 1e6) / 1e6;
 const escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -76,7 +84,7 @@ const voiceMeta = (name) => VOICES[name] || { n: String(name).replace(/(^|-)(\w)
 const presetValues = (name) => ({ ...BASE, ...(VOICES[name]?.v || {}) });
 
 const SLIDERS = [
-  { key: "formantScale", label: "Size", min: 0.85, max: 1.35, step: 0.01, fmt: (v) => "×" + v.toFixed(2) },
+  { key: "formantScale", label: "Formant", min: 0.85, max: 1.35, step: 0.01, fmt: (v) => "×" + v.toFixed(2), help: "Lower for a deeper tone; higher for a brighter tone. Note pitch stays the same." },
   { key: "vibratoDepth", label: "Vibrato", min: 0, max: 0.8, step: 0.01, fmt: (v) => Math.round(v * 100) + " ¢" },
   { key: "portamento", label: "Glide", min: 0.02, max: 0.4, step: 0.01, fmt: (v) => Math.round(v * 1000) + " ms" },
   { key: "breathiness", label: "Breath", min: 0, max: 0.2, step: 0.005, fmt: (v) => Math.round(v * 500) + "%" },
@@ -84,43 +92,86 @@ const SLIDERS = [
   { key: "choirSize", label: "Choir", min: 1, max: 8, step: 1, fmt: (v) => (v === 1 ? "solo" : v + " voices") },
 ];
 
+// Painted toy portraits: uneven ink silhouettes, enamel highlights and tiny scuffs.
+// All details stay in the 54-unit artboard so the same drawing reads at 34 and 72px.
 let faceSeq = 0;
+function facePaint(hex, amount) {
+  const rgb = hex.replace("#", "");
+  const full = rgb.length === 3 ? [...rgb].map(c => c + c).join("") : rgb;
+  return "#" + [0, 2, 4].map(i => Math.round(clamp(parseInt(full.slice(i, i + 2), 16) + amount, 0, 255)).toString(16).padStart(2, "0")).join("");
+}
 function faceSvg(o, size, inner = false) {
   const id = "f" + faceSeq++;
-  const cx = 27, cy = o.kid ? 30 : 28, r = o.kid ? 15 : 17;
-  const skin = o.robot ? "#b9c4cf" : o.skin, hair = o.hair || "#333";
-  let h = `<defs><radialGradient id="${id}" cx=".4" cy=".35" r=".8"><stop offset="0" stop-color="#fff" stop-opacity=".6"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></radialGradient></defs>`;
-  if (o.hood) h += `<path d="M8 50 Q6 12 27 8 Q48 12 46 50Z" fill="${o.hood}"/><path d="M8 50 Q6 12 27 8 Q48 12 46 50Z" fill="url(#${id})"/>`;
-  if (o.style === "long") h += `<path d="M${cx - r - 3} ${cy + 18} Q${cx - r - 4} ${cy - r - 6} ${cx} ${cy - r - 4} Q${cx + r + 4} ${cy - r - 6} ${cx + r + 3} ${cy + 18}Z" fill="${hair}"/>`;
+  const skin = o.skin || "#c3c0ba", hair = o.hair || "#34302e";
+  const ink = "#171717", blue = "#1555ef", pink = "#eb78a1";
+  const paint = (name, base) => `<linearGradient id="${id}-${name}" x1="0" y1="0" x2=".85" y2="1"><stop stop-color="${facePaint(base, 40)}"/><stop offset=".38" stop-color="${base}"/><stop offset="1" stop-color="${facePaint(base, -38)}"/></linearGradient>`;
+  const path = (d, fill, width = 1.7) => `<path d="${d}" fill="${fill}" stroke="${ink}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  const glint = (d, color = "#fff7e9", width = 1) => `<path d="${d}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linecap="round"/>`;
+  let h = `<defs>${paint("skin", skin)}${paint("hair", hair)}${paint("metal", "#bcbab5")}${paint("blue", blue)}${paint("coat", o.hood || "#485264")}</defs>`;
+  h += `<g stroke-linejoin="round">`;
   if (o.robot) {
-    h += `<line x1="${cx}" y1="4" x2="${cx}" y2="12" stroke="#666" stroke-width="2"/><circle cx="${cx}" cy="4" r="3" fill="#ff5a4f"/>`;
-    h += `<rect x="${cx - r - 3}" y="${cy - 4}" width="4" height="9" rx="1.5" fill="#8894a0"/><rect x="${cx + r - 1}" y="${cy - 4}" width="4" height="9" rx="1.5" fill="#8894a0"/>`;
-    h += `<rect x="${cx - r}" y="${cy - r}" width="${2 * r}" height="${2 * r + 2}" rx="7" fill="${skin}" stroke="#7d8894"/>`;
+    h += path("M14 45 Q25 41 40 45 L44 53 L10 53Z", `url(#${id}-metal)`);
+    h += path("M23 39 L23 46 L32 47 L33 40Z", pink);
+    h += path("M26 10 L27 3 L30 3 L29 11Z", `url(#${id}-metal)`, 1.3);
+    h += path("M25 2 Q29 0 32 3 Q33 7 28 7 Q24 6 25 2Z", "#242424", 1.2);
+    h += glint("M27 2.5L29 2");
+    h += path("M20 13 Q22 7 28 8 Q35 9 36 15Z", `url(#${id}-blue)`);
+    h += path("M8 21 Q3 20 3 26 L3 34 Q4 38 9 37 L12 24Z", `url(#${id}-blue)`);
+    h += path("M44 23 Q50 22 51 29 L50 36 Q49 40 44 39Z", `url(#${id}-blue)`);
+    h += path("M13 12 Q14 10 17 11 L44 16 Q47 16 46 20 L43 43 Q43 46 39 45 L10 41 Q8 41 9 37Z", `url(#${id}-metal)`, 2);
+    h += glint("M13 17L14 13L20 14M12 34L11 39L16 40M41 19L43 20L42 25", "#fff9ed", 1.2);
+    h += glint("M29 22L31 20M34 39L38 35M15 29L17 27", "#95958e", .55);
+    h += `<circle cx="20" cy="24" r="2.5" fill="${ink}"/><circle cx="36" cy="26" r="2.5" fill="${ink}"/><circle cx="19.3" cy="23.1" r=".65" fill="#fff"/><circle cx="35.3" cy="25.1" r=".65" fill="#fff"/>`;
+    h += `<ellipse class="mouth" cx="27" cy="35" rx="4" ry="1.5" fill="${ink}"/>`;
+    h += `<path d="M17 32L16.5 37M21 32.5L20.5 37.5M33 34L32.5 39M37 34.5L36.5 39.5" stroke="${ink}" stroke-width="2.2"/>`;
+    h += glint("M6 24L6 28M47 26L48 29M24 10L28 10", "#a9d9ff", 1.1);
   } else {
-    h += `<ellipse cx="${cx}" cy="${cy}" rx="${r}" ry="${r + 1}" fill="${skin}"/>`;
+    if (o.style === "long") h += path("M10 46 Q6 27 13 14 Q19 5 31 9 Q47 10 46 30 L46 49Z", `url(#${id}-hair)`, 2);
+    if (o.hood) h += path("M6 51 Q5 19 16 10 Q26 2 36 12 Q48 23 48 52Z", `url(#${id}-coat)`, 2);
+    if (o.style === "bun") h += path("M22 12 Q16 8 21 3 Q27 -1 31 4 Q34 9 29 13Z", `url(#${id}-hair)`);
+    h += path("M7 53 Q9 45 19 44 L35 44 Q44 46 47 53Z", `url(#${id}-coat)`);
+    h += path("M22 39 L21 46 Q26 51 33 46 L32 39Z", `url(#${id}-skin)`, 1.3);
+    h += path("M19 45 L25 50 L18 50Z", pink, 1.1) + path("M34 45 L28 50 L36 50Z", blue, 1.1);
+    const shift = o.kid ? 2 : 0;
+    h += `<g transform="translate(0 ${shift})">`;
+    h += path("M12 25 Q7 23 8 29 Q8 33 13 33 M41 25 Q46 23 45 29 Q44 34 40 33", `url(#${id}-skin)`, 1.4);
+    h += path(o.kid ? "M13 22 Q14 13 27 13 Q40 13 41 23 L40 34 Q38 43 27 44 Q15 43 13 34Z" : "M12 21 Q13 10 27 11 Q41 11 42 23 L40 35 Q37 44 27 45 Q17 44 13 35Z", `url(#${id}-skin)`, 1.9);
+    h += glint("M15 22L16 18L19 16M15 34L17 37", facePaint(skin, 53), 1.25);
+    if ((!o.style || o.style === "short") && !o.hood) h += path("M12 26 Q9 13 18 10 Q28 5 38 12 Q43 16 41 26 L37 19 Q30 16 23 20 L15 19Z", `url(#${id}-hair)`, 1.8);
+    if (o.style === "slick") h += path("M12 27 Q6 12 21 8 Q35 5 41 16 L42 25 L37 20 L36 15 Q25 23 15 19Z", `url(#${id}-hair)`, 1.8);
+    if (o.style === "long") h += path("M11 30 Q7 14 21 10 Q34 6 42 20 L42 32 L37 22 Q29 22 24 15 Q22 23 14 23Z", `url(#${id}-hair)`, 1.8);
+    if (o.style === "bun") h += path("M12 26 Q9 11 26 10 Q43 10 42 26 L37 20 Q30 19 26 15 Q20 21 15 20Z", `url(#${id}-hair)`, 1.8);
+    if (o.style === "bald") h += path("M12 22L16 20L15 29L12 29Z", `url(#${id}-hair)`, 1) + path("M39 20L42 23L40 30L38 28Z", `url(#${id}-hair)`, 1);
+    if (o.style === "mohawk") h += path("M21 19 L20 10 L25 12 L26 3 L30 9 L34 5 L34 19Z", `url(#${id}-hair)`, 1.7);
+    if (!o.hood && o.style !== "bald") h += glint(o.style === "mohawk" ? "M24 16L24 13M29 14L29 10" : "M16 16Q21 11 28 12M32 13L35 15", facePaint(hair, 65), 1.1);
+    if (o.beard) h += path("M14 33 L18 35 L23 33 L27 35 L32 33 L37 35 L40 32 Q39 44 27 47 Q16 44 14 33Z", `url(#${id}-hair)`, 1.4);
+    if (o.glasses) {
+      h += path("M15 25L24 25L24 30Q19 33 15 29ZM30 25L39 25L38 30Q33 33 30 29Z", "#22252b", 1.4);
+      h += glint("M24 27L30 27", ink, 1.4) + glint("M17 26L21 26M32 26L36 26", "#8ca9c9", .9);
+    } else {
+      h += `<ellipse cx="20" cy="28" rx="2" ry="2.4" fill="${ink}"/><ellipse cx="34" cy="28.5" rx="2" ry="2.4" fill="${ink}"/><circle cx="19.5" cy="27.2" r=".65" fill="#fff"/><circle cx="33.5" cy="27.7" r=".65" fill="#fff"/>`;
+    }
+    h += glint("M27 28L26 32L28 32", facePaint(skin, -50), .8);
+    if (o.blush) h += `<path d="M16 33L19 34M35 34L38 33" stroke="#d7807e" stroke-width="1.8" stroke-linecap="round"/>`;
+    h += `<ellipse class="mouth" cx="27" cy="37" rx="4" ry="1.5" fill="#321d20" stroke="${ink}" stroke-width=".7"/>`;
+    h += glint("M25 41L28 41", o.beard ? facePaint(hair, 60) : facePaint(skin, 35), .75);
+    h += `</g>`;
+    if (o.phones) {
+      h += glint("M9 28Q8 8 27 8Q47 8 45 29", ink, 3);
+      h += path("M7 25L12 24L13 36L8 36Q5 32 7 25Z", `url(#${id}-blue)`, 1.5);
+      h += path("M42 24L47 25Q49 32 46 36L41 36Z", `url(#${id}-blue)`, 1.5);
+      h += glint("M8 27L8 31M44 26L45 28", "#c0e1ff", .9);
+    }
+    if (o.hood) h += glint("M11 43Q9 25 17 16M38 16Q44 24 43 40", facePaint(o.hood, 50), 1.1);
   }
-  if ((!o.style || o.style === "short") && !o.hood && !o.robot) h += `<path d="M${cx - r} ${cy - 2} Q${cx - r} ${cy - r - 5} ${cx} ${cy - r - 3} Q${cx + r} ${cy - r - 5} ${cx + r} ${cy - 2} Q${cx + 6} ${cy - r + 3} ${cx - r} ${cy - 2}Z" fill="${hair}"/>`;
-  if (o.style === "slick") h += `<path d="M${cx - r} ${cy - 1} Q${cx - r - 1} ${cy - r - 6} ${cx + 2} ${cy - r - 4} Q${cx + r + 2} ${cy - r - 3} ${cx + r} ${cy - 3} Q${cx + r - 8} ${cy - r + 1} ${cx - r + 5} ${cy - r + 6} Q${cx - r + 1} ${cy - 4} ${cx - r} ${cy - 1}Z" fill="${hair}"/>`;
-  if (o.style === "long") h += `<path d="M${cx - r} ${cy} Q${cx - 4} ${cy - r - 2} ${cx + r} ${cy - 4} Q${cx + r} ${cy - r - 4} ${cx} ${cy - r - 3} Q${cx - r} ${cy - r - 2} ${cx - r} ${cy}Z" fill="${hair}"/>`;
-  if (o.style === "bun") h += `<circle cx="${cx}" cy="${cy - r - 3}" r="6" fill="${hair}"/><path d="M${cx - r} ${cy - 2} Q${cx} ${cy - r - 8} ${cx + r} ${cy - 2} Q${cx} ${cy - r + 2} ${cx - r} ${cy - 2}Z" fill="${hair}"/>`;
-  if (o.style === "bald") h += `<path d="M${cx - r} ${cy + 2} Q${cx - r} ${cy - 6} ${cx - r + 3} ${cy - 4}M${cx + r} ${cy + 2} Q${cx + r} ${cy - 6} ${cx + r - 3} ${cy - 4}" stroke="${hair}" stroke-width="3" fill="none"/>`;
-  if (o.style === "mohawk") h += `<path d="M${cx - 4} ${cy - r + 2} L${cx - 2} ${cy - r - 9} L${cx + 2} ${cy - r - 7} L${cx + 4} ${cy - r + 2}Z" fill="${hair}"/>`;
-  if (o.beard) h += `<path d="M${cx - r + 2} ${cy + 2} Q${cx} ${cy + r + 12} ${cx + r - 2} ${cy + 2} Q${cx} ${cy + 10} ${cx - r + 2} ${cy + 2}Z" fill="${o.beard}"/>`;
-  const ey = cy - 2;
-  if (o.robot) h += `<rect x="${cx - 10}" y="${ey - 4}" width="7" height="6" rx="1.5" fill="#1b2b3a"/><rect x="${cx + 3}" y="${ey - 4}" width="7" height="6" rx="1.5" fill="#1b2b3a"/><rect x="${cx - 9}" y="${ey - 3}" width="3" height="2" fill="#7df9ff"/><rect x="${cx + 4}" y="${ey - 3}" width="3" height="2" fill="#7df9ff"/>`;
-  else if (o.glasses) h += `<rect x="${cx - 12}" y="${ey - 4}" width="10" height="7" rx="2" fill="#111"/><rect x="${cx + 2}" y="${ey - 4}" width="10" height="7" rx="2" fill="#111"/><path d="M${cx - 2} ${ey - 1}h4" stroke="#111" stroke-width="1.5"/>`;
-  else h += `<ellipse cx="${cx - 6}" cy="${ey}" rx="1.9" ry="2.4" fill="#222"/><ellipse cx="${cx + 6}" cy="${ey}" rx="1.9" ry="2.4" fill="#222"/><circle cx="${cx - 5.4}" cy="${ey - 0.8}" r=".7" fill="#fff"/><circle cx="${cx + 6.6}" cy="${ey - 0.8}" r=".7" fill="#fff"/>`;
-  if (o.blush) h += `<ellipse cx="${cx - 10}" cy="${cy + 5}" rx="3" ry="1.8" fill="#ff8a8a" opacity=".45"/><ellipse cx="${cx + 10}" cy="${cy + 5}" rx="3" ry="1.8" fill="#ff8a8a" opacity=".45"/>`;
-  h += `<ellipse class="mouth" cx="${cx}" cy="${cy + 8}" rx="4" ry="1.5" fill="${o.robot ? "#1b2b3a" : "#5a1d1d"}"/>`;
-  if (o.phones) h += `<path d="M${cx - r - 1} ${cy + 2} Q${cx - r} ${cy - r - 8} ${cx} ${cy - r - 7} Q${cx + r} ${cy - r - 8} ${cx + r + 1} ${cy + 2}" stroke="#333" stroke-width="3" fill="none"/><rect x="${cx - r - 5}" y="${cy - 3}" width="7" height="11" rx="3" fill="#e0457b"/><rect x="${cx + r - 2}" y="${cy - 3}" width="7" height="11" rx="3" fill="#e0457b"/>`;
-  if (!o.robot) h += `<ellipse cx="${cx}" cy="${cy}" rx="${r}" ry="${r + 1}" fill="url(#${id})"/>`;
+  h += "</g>";
   return inner ? h : `<svg width="${size}" height="${size}" viewBox="0 0 54 54" aria-hidden="true">${h}</svg>`;
 }
 function voiceSvg(v, size) {
   if (!v.group) return faceSvg(v.face, size);
   let h = `<svg width="${size}" height="${size}" viewBox="0 0 54 54" aria-hidden="true">`;
   v.group.forEach((o, i) => {
-    const x = [-12, 12, 0][i], y = [-4, -4, 6][i], sc = 0.62;
+    const x = [-11, 11, 0][i], y = [-6, -6, 7][i], sc = 0.61;
     h += `<g transform="translate(${27 + x - 27 * sc},${27 + y - 27 * sc}) scale(${sc})">${faceSvg(o, 54, true)}</g>`;
   });
   return h + "</svg>";
@@ -133,7 +184,7 @@ function setMouth(ph) {
   if (key === mouthNow) return;
   mouthNow = key;
   const [rx, ry] = MOUTH[ph] || (ph ? [5, 2.5] : [4, 1.5]);
-  document.querySelectorAll("#bigface .mouth, #chipFace .mouth").forEach((m) => { m.setAttribute("rx", rx); m.setAttribute("ry", ry); });
+  document.querySelectorAll("#bigface .mouth").forEach((m) => { m.setAttribute("rx", rx); m.setAttribute("ry", ry); });
 }
 
 // ===========================================================================
@@ -165,6 +216,16 @@ function normSong(raw) {
     })
     .filter((n) => Number.isFinite(n.pitch));
   sortNotes(out.notes);
+  // One record per audio import (song-merge.js). Songs saved before region-by-region import kept
+  // their one import in `transcription`: it still reads (and sets) the latest import, but only the
+  // list is saved.
+  out.transcriptions = songTranscriptions(s);
+  delete out.transcription;
+  Object.defineProperty(out, "transcription", {
+    configurable: true, enumerable: false,
+    get() { return this.transcriptions[this.transcriptions.length - 1] ?? null; },
+    set(v) { this.transcriptions = v && typeof v === "object" ? [v] : []; },
+  });
   return out;
 }
 const sortNotes = (notes) => notes.sort((a, b) => a.start - b.start || a.pitch - b.pitch);
@@ -178,6 +239,12 @@ function serialize(song) {
       return o;
     }),
   });
+}
+// What a plan depends on in a song, as serialize() writes it (not the lyric text while the notes
+// carry their own lyrics).
+function notesKey(song) {
+  const notes = sortNotes([...(song?.notes || [])]).map((n) => [n.pitch, r6(n.start), r6(n.dur), n.lyric || ""]);
+  return JSON.stringify([notes, song?.dictionary ?? null, !!song?.useNoteLyrics, song?.useNoteLyrics ? "" : song?.lyrics]);
 }
 // Order-independent form for comparing our song with the plugin's copy.
 function canon(song) {
@@ -208,6 +275,7 @@ function restore(json) {
   S.song = normSong(JSON.parse(json));
   S.sel = new Set(S.song.notes.filter((n) => old.includes(`${n.pitch}@${r6(n.start)}`)).map((n) => n._id));
   H.coKey = null;
+  restoreSource();
   onSongChanged({ lyrics: true });
 }
 function undo() {
@@ -282,14 +350,15 @@ async function pushNow() {
 let planSeq = 0, planTimer = 0;
 async function fetchPlan() {
   const my = ++planSeq;
+  const plannedSong = lastPushed, bpm = S.bpm;
   let txt = "";
   try { txt = await B.getPlan(); } catch {}
   if (my !== planSeq) return;
-  const bpm = S.bpm; // the plan is in seconds at the tempo current when it was made
   let plan = null;
   try { plan = txt ? JSON.parse(txt) : null; } catch {}
   S.plan = plan;
   S.planBpm = bpm;
+  try { S.planKey = notesKey(JSON.parse(plannedSong)); } catch { S.planKey = ""; } // Never tag an older response as a newer song.
   S.planFailed = !plan && S.song.notes.length > 0;
   relabel();
   refreshTexts();
@@ -308,6 +377,7 @@ async function pullSong() {
   checkpoint();
   const wasEmpty = !S.song.notes.length;
   S.song = incoming;
+  await restoreSource();
   S.sel.clear();
   lastPushed = serialize(incoming);
   onSongChanged({ lyrics: true, push: false });
@@ -320,6 +390,7 @@ function onSongChanged({ lyrics = false, push = true } = {}) {
     if (els.lyrics.value !== S.song.lyrics) els.lyrics.value = S.song.lyrics;
   }
   syncVoiceUI();
+  syncKeyUI();
   updateWorld();
   relabel();
   refreshTexts();
@@ -330,37 +401,21 @@ function onSongChanged({ lyrics = false, push = true } = {}) {
 // ===========================================================================
 // 4. plan -> what each note sings
 function relabel() {
-  const labels = new Map();
-  const syls = (S.plan?.syllables || []).map((s) => ({ ...s, b0: (s.start * S.planBpm) / 60, b1: (s.end * S.planBpm) / 60 }));
-  const notes = sortNotes([...S.song.notes]);
-  const tol = 0.04;
-  for (const n of notes) {
-    if (!S.plan) { labels.set(n._id, null); continue; }
-    let best = -1, bestD = tol;
-    for (let i = 0; i < syls.length; i++) {
-      const d = Math.abs(syls[i].b0 - n.start);
-      if (d < bestD) { bestD = d; best = i; }
-      if (syls[i].b0 > n.start + tol) break;
-    }
-    if (best >= 0) {
-      const s = syls[best], prev = syls[best - 1];
-      const ph = String(s.phonemes || "");
-      const phon = ph.replace(/\|/g, " ").replace(/\s+/g, " ").trim();
-      const vowel = (ph.split("|")[1] || "").trim().split(" ")[0];
-      if (s.text) labels.set(n._id, { kind: "word", text: s.text + (s.continues ? "-" : ""), syl: s, phon, vowel });
-      else if (prev && prev.continues) labels.set(n._id, { kind: "cont", text: "-" + phon.toLowerCase().replace(/ /g, ""), syl: s, phon, vowel });
-      else labels.set(n._id, { kind: "hum", text: "mm", syl: s, phon: phon || "M", vowel: "M" });
-      continue;
-    }
-    const s = syls.find((x) => x.b0 < n.start + tol && x.b1 > n.start + tol);
-    if (s) {
-      const vowel = (String(s.phonemes || "").split("|")[1] || "").trim().split(" ")[0];
-      labels.set(n._id, { kind: "hold", text: "_", syl: s, phon: vowel, vowel });
-    } else {
-      labels.set(n._id, { kind: "hum", text: "mm", syl: null, phon: "M", vowel: "M" });
-    }
-  }
-  S.labels = labels;
+  S.labels = labelNotes(sortNotes([...S.song.notes]), S.plan, S.planBpm);
+  if (mirrorNoteLyrics()) schedulePush();
+}
+// While the notes carry their own lyrics (an audio import or singing take, or after splitting or
+// joining syllables), the lyric box shows those lyrics as text that flows back onto the same
+// notes: hyphenated, "_" on held notes, "mm" on lyric-less ones. Editing the text then keeps every
+// syllable where it was. The labels say which one-note words need "~" to stay on their note.
+function mirrorNoteLyrics() {
+  // Wait for a plan of these very notes: stale labels could drop a "~" a word needs.
+  if (!S.song.useNoteLyrics || !S.plan || S.planKey !== notesKey(S.song)) return false;
+  const text = lyricsFromNotes(S.song.notes, { labels: S.labels }) ?? "";
+  if (text === S.song.lyrics) return false;
+  S.song.lyrics = text;
+  if (els.lyrics.value !== text) els.lyrics.value = text;
+  return true;
 }
 
 // ===========================================================================
@@ -370,8 +425,45 @@ const els = {
   lyrics: $("lyrics"), counts: $("counts"), warn: $("warn"), info: $("info"), snap: $("snap"), lyricEdit: $("lyricEdit"),
   lcd: $("lcd"), lcdState: $("lcdState"), lcdPos: $("lcdPos"), lcdLine: $("lcdLine"),
   capture: $("capture"), play: $("play"), playIco: $("playIco"), playLbl: $("playLbl"), tempo: $("tempo"),
-  file: $("file"), mode: $("mode"), voiceChip: $("voiceChip"),
+  file: $("file"), mode: $("mode"),
 };
+function syncKeyUI() {
+  const settings = S.song.keyCorrection || {root:-1,scale:'major',mode:'gentle'};
+  $('keyRoot').value = String(settings.root);
+  $('keyScale').value = settings.scale;
+  $('keyMode').value = settings.mode;
+  $('keyApply').disabled = Number(settings.root)<0 || !S.song.notes.length;
+  syncKeyLabel();
+}
+// The bottom bar's Key button names the key in use ("Key: Off", "Key: E♭ minor").
+function syncKeyLabel() {
+  const root = Number($('keyRoot').value), btn = $('keyBtn');
+  btn.textContent = root < 0 ? 'Key: Off' : `Key: ${$('keyRoot').selectedOptions[0].text} ${$('keyScale').value}`;
+  btn.classList.toggle('on', root >= 0);
+}
+for (const id of ['keyRoot','keyScale','keyMode']) $(id).addEventListener('change', () => {
+  S.song.keyCorrection = {...S.song.keyCorrection,root:Number($('keyRoot').value),scale:$('keyScale').value,mode:$('keyMode').value,auto:false};
+  $('keyApply').disabled = Number($('keyRoot').value)<0 || !S.song.notes.length;
+  syncKeyLabel();
+  schedulePush();
+});
+$('keyApply').addEventListener('click', () => {
+  const settings = S.song.keyCorrection;
+  const candidates = S.sel.size ? selectedNotes() : S.song.notes;
+  // Every import's evidence, the latest first (it replaced earlier imports where they overlap).
+  const evidence = songTranscriptions(S.song).slice().reverse().flatMap(t => t.originalNotes || []);
+  const changes = candidates.flatMap(n => {
+    const original = evidenceFor(n, evidence);  // also behind a note since moved onto the grid or into the key
+    const pitch = correctedPitch(n,settings,original);
+    return pitch===n.pitch ? [] : [{note:n,before:n.pitch,after:pitch}];
+  });
+  if (!changes.length) {flash('NO CHANGES', settings.mode==='gentle' ? 'No uncertain notes close enough to the chosen scale' : 'Notes already fit the chosen scale');return;}
+  checkpoint();
+  S.song.keyCorrection = {...settings,changes:changes.map(c=>({start:c.note.start,dur:c.note.dur,before:c.before,after:c.after}))};
+  S.sel.clear();
+  for(const c of changes) {c.note.pitch=c.after;S.sel.add(c.note._id);}
+  onSongChanged();scrollToNotes();flash('PITCH CORRECTED', `${changes.length} notes · Undo restores the previous pitches`);
+});
 const view = { w: 300, h: 200, dpr: 1 };
 let needDraw = true;
 const dirty = () => { needDraw = true; };
@@ -411,6 +503,8 @@ function measure() {
 function noteAtBeat(b) { return S.song.notes.find((n) => b >= n.start && b < n.start + n.dur) || null; }
 
 function draw() {
+  drawTimeline();
+  drawSourceWave();
   const sx = els.scroller.scrollLeft, sy = els.scroller.scrollTop;
   const { w: W, h: Hh } = view;
   const { ppb, rowH, hi, lo } = S;
@@ -693,6 +787,12 @@ sc.addEventListener("pointerdown", (e) => {
   dirty();
 });
 
+let previewTimer = 0;
+function previewNote(pitch) {
+  clearTimeout(previewTimer);
+  if (S.status.playing) return;
+  previewTimer = setTimeout(()=>B.previewNote?.(pitch),45);
+}
 function beginDrag(d) {
   if (d.mode === "move") {
     checkpoint();
@@ -715,11 +815,13 @@ function beginDrag(d) {
     S.song.notes.push(n);
     S.sel.add(n._id);
     d.anchor = n;
+    previewNote(n.pitch);
   }
 }
 
 function updateDrag(d, p) {
   if (d.mode === "move") {
+    const previousPitch = d.anchor.pitch;
     const o = d.orig.get(d.anchor._id);
     let dB = snapB(o.start + beatAt(p.wx - d.p0.wx)) - o.start;
     let dP = pitchAt(p.wy) - pitchAt(d.p0.wy);
@@ -731,6 +833,7 @@ function updateDrag(d, p) {
       const v = d.orig.get(n._id);
       if (v) { n.start = v.start + dB; n.pitch = v.pitch + dP; }
     }
+    if (d.anchor.pitch !== previousPitch) previewNote(d.anchor.pitch);
   } else if (d.mode === "resize") {
     const newEnd = Math.max(d.anchor.start + minDur(), snapB(d.origEnd + beatAt(p.wx - d.p0.wx)));
     const dD = newEnd - d.origEnd;
@@ -788,6 +891,7 @@ function endDrag(cancel = false) {
     }
   } else if (d.mode !== "marquee") {
     if (cancel) { restore(H.undo.pop()); return; }
+    if (d.mode === "move") previewNote(d.anchor.pitch);
     if (d.mode === "create" || d.mode === "resize") S.lastDur = d.anchor.dur;
     resolveOverlaps(new Set(S.sel));
     sortNotes(S.song.notes);
@@ -813,6 +917,7 @@ sc.addEventListener("dblclick", (e) => {
   const n = { pitch: pitchAt(p.wy), start: Math.max(0, snapB(beatAt(p.wx), "floor")), dur: S.lastDur, _id: nextId++ };
   S.song.notes.push(n);
   S.sel = new Set([n._id]);
+  previewNote(n.pitch);
   resolveOverlaps(new Set([n._id]));
   onSongChanged();
 });
@@ -837,6 +942,168 @@ function onWheel(e, target) {
 sc.addEventListener("wheel", (e) => onWheel(e, "grid"), { passive: false });
 els.keys.addEventListener("wheel", (e) => onWheel(e, "keys"), { passive: false });
 els.ruler.addEventListener("wheel", (e) => onWheel(e, "ruler"), { passive: false });
+// A click (or drag) on the ruler places the playhead on the grid: where Play starts and where Stop
+// returns. Inside a DAW a click moves the DAW's playhead over MMC (locateHost).
+els.ruler.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0 || e.ctrlKey) return;
+  const beat = Math.max(0, snapB((e.offsetX + els.scroller.scrollLeft) / S.ppb));
+  if (inDaw()) { requestLocate(beat); return; }
+  els.ruler.setPointerCapture(e.pointerId);
+  placePlayhead(e);
+});
+// ---- the DAW's transport over MMC (plugin/Source/HostMmc.h)
+// No plugin API starts, stops or moves a DAW's transport. Novox sends MIDI Machine Control from its
+// own MIDI port ("Novox The Robot"), which a DAW listening to MMC input follows: in Logic a setting of
+// each project. The status that follows tells whether it listened, but only while the DAW calls the
+// plugin (status.blocks advancing; Logic stops calling one on a track it isn't playing, leaving
+// status.beats and status.playing as they were), and only from a real move:
+// - a ruler click away from the playhead that lands there (or, playing, jumps there): MMC works;
+// - one that lands elsewhere while stopped: MMC works, and the miss teaches the project's frame rate
+//   (when the sent frame scaled by a standard rate explains it) or else where its bar 1 is, and the
+//   locate goes again (twice at most);
+// - a DAW calling the plugin that does not move, start or stop: MMC does not work; the hint names
+//   the setting.
+// What it learned is saved with the DAW project (setMmcState), as the setting is. Until MMC is known
+// to work, Space reaches the DAW as a key press (hostSpace). GarageBand has no MMC input.
+const MMC_HINT = "Logic: File › Project Settings › Synchronization › MIDI › Listen to MIDI Machine Control (MMC) input (each project; or save it in your template)";
+const MMC_RATES = [24, 25, 29.97, 30];
+const mmc = { works: false, offset: 0, rate: 0, loaded: false, pending: null, queued: null, start: null, stop: null,
+  intent: null, shown: null, located: null, hinted: false, blocksAt: 0 };
+const inDaw = () => !!(S.status.daw || S.status.host);
+const noMmc = () => /garageband/i.test(S.status.hostName || "") || S.status.mmc?.port === false;
+// Whether the DAW is calling the plugin now.
+const hostLive = () => performance.now() - mmc.blocksAt < 400;
+function mmcSave(works) {
+  if (works === mmc.works && !mmc.dirty) return;
+  mmc.works = works; mmc.dirty = false;
+  B.setMmcState?.(mmc.works, mmc.offset, mmc.rate);
+}
+function mmcHint(state, line) { flash(state, line, 8000, MMC_HINT); }
+// One locate at a time: a click while one is out waits, and only the latest waiting click goes.
+function requestLocate(beat) {
+  if (noMmc()) { flash("PLAYHEAD", "GarageBand's playhead can't be moved from a plugin"); return; }
+  if (mmc.pending) { mmc.queued = beat; return; }
+  locateHost(beat);
+}
+async function locateHost(beat, tries = 0) {
+  const st = S.status;
+  if (!Number.isFinite(+st.seconds)) { flash("PLAYHEAD", "This DAW does not tell plugins its time"); return; }
+  const target = st.seconds + (beat - st.beats) * 60 / S.bpm;  // seconds from bar 1, as the DAW counts them
+  const p = { beat, target, sent: target + mmc.offset, from: st.beats, fromSeconds: +st.seconds, blocks: st.blocks,
+    playing: !!st.playing && hostLive(), live: hostLive(), at: performance.now(), tries, offset: mmc.offset, rate: mmc.rate };
+  mmc.pending = p;
+  const reply = await B.hostLocate?.(p.sent, mmc.rate);
+  if (mmc.pending !== p) return;
+  if (!reply?.sent) { mmc.pending = null; flash("PLAYHEAD", "No MIDI port to the DAW on this system"); return; }
+  p.frame = +reply.frame || 0; p.fps = +reply.fps || 30;
+  p.at = performance.now();
+  if (Math.abs(beat - p.from) > 1) mmc.located = { beat, at: p.at };
+  if (mmc.works && !p.playing) { mmc.shown = { beat, blocks: st.blocks }; S.status.beats = beat; dirty(); }
+}
+function settleLocate() {
+  mmc.pending = null;
+  const next = mmc.queued;
+  mmc.queued = null;
+  if (next !== null) locateHost(next);
+}
+function hostPlayStop() {
+  if (!mmc.works || noMmc()) { B.hostSpace?.(); return; }
+  const now = performance.now();
+  // Toggle from what was asked a moment ago, not a status that has not caught up.
+  const playing = mmc.intent && now - mmc.intent.at < 600 ? mmc.intent.playing : S.status.playing && hostLive();
+  mmc.intent = { playing: !playing, at: now };
+  const st = S.status;
+  B.hostTransport?.(playing ? "stop" : "play").then((sent) => {
+    if (!sent) { B.hostSpace?.(); return; }
+    if (playing) { mmc.stop = { at: performance.now(), beats: st.beats }; mmc.start = null; }
+    else { mmc.start = { at: performance.now(), blocks: st.blocks }; mmc.stop = null; }
+  });
+}
+// MMC did not work: forget it for this project and say why; a Space press that went nowhere goes
+// again as the key press.
+function mmcFailed(state, line, { space = false } = {}) {
+  mmcSave(false);
+  if (space) B.hostSpace?.();
+  mmcHint(state, line);
+}
+function checkMmc(st, prev) {
+  const now = performance.now();
+  if (st.blocks !== prev.blocks) mmc.blocksAt = now;
+  if (!mmc.loaded && st.mmc) {
+    mmc.loaded = true;
+    mmc.works = !!st.mmc.works; mmc.offset = +st.mmc.offset || 0; mmc.rate = +st.mmc.rate || 0;
+  }
+  // A clicked position stays shown until the DAW reports again.
+  if (mmc.shown) { if (st.blocks === mmc.shown.blocks) st.beats = mmc.shown.beat; else mmc.shown = null; }
+  // Play and Stop show only while the DAW calls the plugin; fail only on that evidence.
+  if (mmc.start) {
+    if (st.playing && hostLive()) mmc.start = null;
+    else if (now - mmc.start.at > 1500) {
+      const failed = hostLive() && !st.playing && st.blocks - mmc.start.blocks >= 8;
+      mmc.start = null;
+      if (failed) mmcFailed("TRANSPORT", "The DAW did not start · in Logic turn on Listen to MMC Input", { space: true });
+    }
+  }
+  if (mmc.stop) {
+    if (!st.playing || !hostLive()) mmc.stop = null;
+    else if (now - mmc.stop.at > 800 && st.beats - mmc.stop.beats > 0.25) {
+      mmc.stop = null;
+      mmcFailed("TRANSPORT", "The DAW did not stop · in Logic turn on Listen to MMC Input", { space: true });
+    }
+  }
+  // A DAW that was not calling the plugin at the click starts where it was put.
+  if (mmc.located && st.playing && !prev.playing) {
+    if (!mmc.works && now - mmc.located.at < 10000 && Math.abs(st.beats - mmc.located.beat) < 0.25) mmcSave(true);
+    mmc.located = null;
+  }
+  const p = mmc.pending;
+  if (!p || p.frame === undefined) return;
+  const age = now - p.at;
+  if (st.blocks === p.blocks) {  // no word from the DAW since the click
+    if (age > 1200) {
+      settleLocate();
+      if (!mmc.works && !mmc.hinted && p.tries === 0) { mmc.hinted = true; mmcHint("PLAYHEAD", "Did it move? If not, in Logic turn on Listen to MMC Input"); }
+    }
+    return;
+  }
+  const fps = p.fps || 30, tol = Math.max(1 / 32, 1.01 * (S.bpm / 60) / fps);
+  if (p.playing || st.playing) {
+    // Playing: a jump the playback alone does not explain, to about where it was put.
+    const noMove = p.from + Math.min(age, 1500) / 1000 * S.bpm / 60;
+    const jumped = Math.abs(st.beats - noMove) > 0.5, near = st.beats - p.beat > -tol && st.beats - p.beat < tol + Math.min(age, 1500) / 1000 * S.bpm / 60 + 0.25;
+    if (jumped && near) { mmcSave(true); settleLocate(); }
+    else if (age > 1200) { settleLocate(); if (p.tries === 0 && Math.abs(p.beat - p.from) > 1 && !jumped && hostLive()) mmcFailed("PLAYHEAD", "The DAW did not move · in Logic turn on Listen to MMC Input"); }
+    return;
+  }
+  const moved = Math.abs(st.beats - p.from) > tol;
+  if (Math.abs(st.beats - p.beat) < tol) { if (moved || p.tries) mmcSave(true); settleLocate(); return; }
+  if (moved && Number.isFinite(+st.seconds)) {
+    // Landed elsewhere: MMC works; learn why the landing missed, then go again.
+    mmc.dirty = true;
+    // The DAW read the sent frame at its own rate when that explains the miss; otherwise its bar 1
+    // is elsewhere in timecode, and the miss becomes the offset added to every locate.
+    const miss = st.seconds - p.target;  // seconds past the target, with p.offset already applied
+    const implied = p.frame >= 4 ? p.frame / (p.frame / fps + miss) : 0;
+    const rate = MMC_RATES.find((r) => Math.abs(implied - r) / r < 0.03 && Math.abs(r - fps) > 0.5);
+    if (rate) mmc.rate = rate; else mmc.offset = p.offset - miss;
+    mmcSave(true);
+    mmc.pending = null;
+    if (p.tries < 2) locateHost(p.beat, p.tries + 1); else settleLocate();
+    return;
+  }
+  if (age > 1200) {
+    if (p.tries > 0) { mmc.offset = p.offset; mmc.rate = p.rate; settleLocate(); return; }  // MMC is proven; the retry changed nothing
+    settleLocate();
+    if (Math.abs(p.beat - p.from) > tol && st.blocks - p.blocks >= 8 && hostLive())
+      mmcFailed("PLAYHEAD", "The DAW did not move · in Logic turn on Listen to MMC Input");
+  }
+}
+function placePlayhead(e) {
+  const beat = Math.max(0, snapB((e.offsetX + els.scroller.scrollLeft) / S.ppb));
+  B.setPlayhead?.(beat);
+  S.status.beats = beat;  // drawn now; the next status confirms it
+  dirty();
+}
 
 // piano keys: highlight a row (no sound)
 els.keys.addEventListener("pointerdown", (e) => {
@@ -846,34 +1113,78 @@ els.keys.addEventListener("pointerdown", (e) => {
   dirty();
 });
 
-// ---- lyric override editor (double-click a note)
+// ---- lyric editor (double-click a note); one dictionary syllable per following note
 let editingId = null;
+let editingInitialValue = "";
+let lyricEditPending = Promise.resolve(true);
 function openLyricEdit(n) {
   editingId = n._id;
   const ed = els.lyricEdit;
+  const l = S.labels.get(n._id);
   ed.hidden = false;
-  ed.value = n.lyric || "";
+  ed.value = n.lyric || (l?.kind === "word" || l?.kind === "hold" ? l.text : "");
+  editingInitialValue = ed.value.trim();
   const x = n.start * S.ppb - sc.scrollLeft, y = (S.hi - n.pitch) * S.rowH - sc.scrollTop;
   ed.style.left = clamp(x, 0, view.w - 90) + "px";
   ed.style.top = clamp(y - 4, 0, view.h - 22) + "px";
   ed.style.width = Math.max(90, n.dur * S.ppb) + "px";
-  const l = S.labels.get(n._id);
-  ed.placeholder = l && l.kind === "word" ? `own lyric (now “${l.text}”)` : "own lyric";
+  ed.placeholder = l && l.kind === "word" ? `lyric (now “${l.text}”)` : "word or syllables";
   ed.focus();
   ed.select();
 }
 function closeLyricEdit(commit) {
   const ed = els.lyricEdit;
-  if (ed.hidden) return;
+  if (ed.hidden) return lyricEditPending;
   ed.hidden = true;
   const n = noteById(editingId);
+  const originalText = editingInitialValue;
   editingId = null;
-  if (!commit || !n) return;
+  if (!commit || !n) {
+    lyricEditPending = lyricEditPending.then(() => true);
+    return lyricEditPending;
+  }
   const v = ed.value.trim();
-  if ((n.lyric || "") === v) return;
+  if (originalText === v) {
+    lyricEditPending = lyricEditPending.then(() => true);
+    return lyricEditPending;
+  }
+  const id = n._id;
+  lyricEditPending = lyricEditPending.then(() => commitNoteLyric(id, v)).then(() => true).catch(error => {
+    flash("CAN’T CHANGE LYRIC", String(error.message || error));
+    const note = noteById(id);
+    if (note && editingId === null) { openLyricEdit(note); els.lyricEdit.value = v; els.lyricEdit.select(); }
+    return false;
+  });
+  return lyricEditPending;
+}
+async function planCandidate(song, bpm = S.bpm) {
+  const text = await B.planSong(serialize(song), bpm);
+  let plan;
+  try { plan = JSON.parse(text); } catch {}
+  if (!plan || !Array.isArray(plan.syllables)) throw new Error("The singer couldn’t assign these lyrics. Please try again.");
+  return { plan, labels: labelNotes(sortNotes([...song.notes]), plan, bpm), bpm };
+}
+async function commitNoteLyric(id, text) {
+  if (!noteById(id)) return;
+  const before = notesKey(S.song), bpm = S.bpm;
+  const labels = await currentLabels(true);
+  if (!labels) throw new Error("The song changed while editing. Enter the lyric again.");
+  const tokenResult = JSON.parse(await B.lyricTokens(text, JSON.stringify(S.song.dictionary || {})));
+  if (!Array.isArray(tokenResult.tokens)) throw new Error(tokenResult.error || "Couldn’t split the word into syllables.");
+  if (notesKey(S.song) !== before || S.bpm !== bpm) throw new Error("The song changed while editing. Enter the lyric again.");
+  const edited = applyNoteLyrics({notes:S.song.notes, noteId:id, tokens:tokenResult.tokens, labels, useNoteLyrics:!!S.song.useNoteLyrics});
+  if (edited.error) throw new Error(edited.error);
+  const candidate = {...S.song, notes:edited.notes, useNoteLyrics:true};
+  const preview = await planCandidate(candidate, bpm);
+  if (notesKey(S.song) !== before || S.bpm !== bpm) throw new Error("The song changed while editing. Enter the lyric again.");
+  candidate.lyrics = lyricsFromNotes(candidate.notes, {labels:preview.labels}) ?? "";
   checkpoint();
-  if (v) n.lyric = v; else delete n.lyric;
-  onSongChanged();
+  S.song.notes = candidate.notes;
+  S.song.useNoteLyrics = true;
+  S.song.lyrics = candidate.lyrics;
+  ++planSeq;
+  S.plan = preview.plan; S.planBpm = bpm; S.planKey = notesKey(S.song); S.planFailed = false;
+  onSongChanged({lyrics:true});
 }
 els.lyricEdit.addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); closeLyricEdit(true); sc.focus({ preventScroll: true }); }
@@ -882,17 +1193,96 @@ els.lyricEdit.addEventListener("keydown", (e) => {
 });
 els.lyricEdit.addEventListener("blur", () => closeLyricEdit(true));
 
+// The OS clipboard carries melody between plugin instances, including separately hosted AUs.
+let clipboardBusy = false;
+const melodyShortcutAllowed = () => S.loaded && !isTyping(document.activeElement) && !document.querySelector("dialog[open]");
+async function copyMelody() {
+  if (clipboardBusy || !B) return;
+  const selected = new Set(S.sel);
+  clipboardBusy = true;
+  try {
+    if (!await closeLyricEdit(true)) return;
+    for (const id of selected) if (!noteById(id)) throw new Error("The selection changed. Select the melody and copy again.");
+    if (!selected.size) return flash("SELECT NOTES", "Select the melody to copy");
+    const before = notesKey(S.song);
+    const labels = await currentLabels(true);
+    if (!labels || notesKey(S.song) !== before) throw new Error("The song changed. Copy the melody again.");
+    const text = createMelodyClipboard(S.song, selected, {labels});
+    await B.writeClipboard(text);
+    flash("MELODY COPIED", `${selected.size} note${selected.size === 1 ? "" : "s"} · original timeline position included`);
+  } catch (error) { flash("CAN’T COPY", String(error.message || error)); }
+  finally { clipboardBusy = false; }
+}
+function confirmMelodyReplacement(count, pastedCount, start) {
+  const dialog = $("pasteDialog");
+  $("pasteMessage").textContent = `${pastedCount} pasted note${pastedCount === 1 ? "" : "s"} at ${fmtPos(start)} overlap${pastedCount === 1 ? "s" : ""} ${count} existing note${count === 1 ? "" : "s"}. Replace the overlapping parts?`;
+  dialog.returnValue = "cancel";
+  return new Promise(resolve => {
+    dialog.addEventListener("close", () => resolve(dialog.returnValue === "replace"), {once:true});
+    dialog.showModal();
+  });
+}
+async function pasteMelody(clipboardText) {
+  if (clipboardBusy || !B) return;
+  clipboardBusy = true;
+  try {
+    if (!await closeLyricEdit(true)) return;
+    const payload = parseMelodyClipboard(typeof clipboardText === "string" ? clipboardText : await B.readClipboard());
+    const before = notesKey(S.song), bpm = S.bpm;
+    const labels = await currentLabels(true);
+    if (!labels || notesKey(S.song) !== before) throw new Error("The song changed. Paste the melody again.");
+    const conflicts = melodyPasteConflicts(S.song.notes, payload);
+    if (conflicts.count && !await confirmMelodyReplacement(conflicts.count, payload.notes.length, Math.min(...payload.notes.map(n => n.start)))) return;
+    if (notesKey(S.song) !== before || S.bpm !== bpm) throw new Error("The song changed. Paste again to check the new overlaps.");
+    const result = applyMelodyPaste(S.song, payload, {labels, overwrite:conflicts.count > 0});
+    for (const n of result.notes) if (n._id == null) n._id = nextId++;
+    const candidate = {...S.song, notes:result.notes, useNoteLyrics:true};
+    const preview = await planCandidate(candidate, bpm);
+    if (notesKey(S.song) !== before || S.bpm !== bpm) throw new Error("The song changed. Paste again to check the new overlaps.");
+    candidate.lyrics = lyricsFromNotes(candidate.notes, {labels:preview.labels}) ?? "";
+    checkpoint();
+    S.song.notes = candidate.notes;
+    S.song.useNoteLyrics = true;
+    S.song.lyrics = candidate.lyrics;
+    if (result.transcriptions) S.song.transcriptions = result.transcriptions;
+    ++planSeq;
+    S.plan = preview.plan; S.planBpm = bpm; S.planKey = notesKey(S.song); S.planFailed = false;
+    S.sel = new Set(result.pastedNotes.map(n => n._id));
+    onSongChanged({lyrics:true});
+    showNotes(result.pastedNotes);
+    flash("MELODY PASTED", `${result.pastedNotes.length} notes at their original position · ⌘Z undoes`);
+  } catch (error) { flash("CAN’T PASTE", String(error.message || error)); }
+  finally { clipboardBusy = false; }
+}
+$("copyMelody").addEventListener("click", () => copyMelody());
+$("pasteMelody").addEventListener("click", () => pasteMelody());
+// WKWebView's native Edit commands arrive as clipboard events. Text fields keep their own
+// ordinary copy/paste; the keyboard handler below covers hosts that deliver key events instead.
+document.addEventListener("copy", e => {
+  if (!melodyShortcutAllowed()) return;
+  e.preventDefault(); copyMelody();
+});
+document.addEventListener("paste", e => {
+  if (!melodyShortcutAllowed()) return;
+  e.preventDefault();
+  pasteMelody(e.clipboardData ? e.clipboardData.getData("text/plain") : undefined);
+});
+
 // ---- keyboard shortcuts (ignored while typing)
 document.addEventListener("keydown", (e) => {
-  if (isTyping(e.target)) return;
+  if (isTyping(e.target) || document.querySelector("dialog[open]")) return;
   const mod = e.metaKey || e.ctrlKey;
   const k = e.key;
+  if (mod && (k === "c" || k === "C")) { e.preventDefault(); copyMelody(); return; }
+  if (mod && (k === "v" || k === "V")) { e.preventDefault(); pasteMelody(); return; }
   if (mod && (k === "z" || k === "Z")) { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if (mod && (k === "y" || k === "Y")) { e.preventDefault(); redo(); return; }
   if (mod && (k === "a" || k === "A")) { e.preventDefault(); S.sel = new Set(S.song.notes.map((n) => n._id)); refreshInfo(); dirty(); return; }
   if (mod && (k === "d" || k === "D")) { e.preventDefault(); duplicateSelection(); return; }
   if (k === "Escape") { S.sel.clear(); S.hotPitch = null; refreshInfo(); dirty(); return; }
-  if (k === " " && !S.status.host && !mod) { e.preventDefault(); togglePlay(); return; }
+  // Space plays and stops: our transport, or in a DAW its transport (over MMC once the DAW is known
+  // to listen, else as the key press the native side hands it).
+  if (k === " " && !mod) { e.preventDefault(); if (!inDaw()) togglePlay(); else if (!e.repeat) hostPlayStop(); return; }
   if ((k === "Delete" || k === "Backspace") && S.sel.size) {
     e.preventDefault();
     checkpoint();
@@ -919,6 +1309,7 @@ document.addEventListener("keydown", (e) => {
     dropNoopCheckpoint();
     onSongChanged();
     const a = sel[0];
+    if (a && !e.shiftKey) previewNote(a.pitch);
     if (a) { // keep it in view
       const y = (S.hi - a.pitch) * S.rowH;
       if (y < sc.scrollTop || y > sc.scrollTop + view.h - S.rowH) sc.scrollTop = y - view.h / 2;
@@ -943,6 +1334,7 @@ function duplicateSelection() {
 
 // ---- info strip + counters
 function refreshInfo() {
+  $("copyMelody").disabled = !S.sel.size;
   const el = els.info;
   let id = drag && drag.anchor ? drag.anchor._id : S.hover;
   if (id == null && S.sel.size === 1) id = [...S.sel][0];
@@ -950,8 +1342,8 @@ function refreshInfo() {
   if (!n) {
     if (S.sel.size > 1) { el.innerHTML = `<b>${S.sel.size} notes</b> selected · arrows nudge · ⌫ deletes · ⌘D duplicates`; return; }
     el.textContent = S.song.notes.length
-      ? "Drag to draw a note · shift-drag to select · double-click a note to give it its own lyric"
-      : "Draw some notes, import a MIDI file, or arm Capture and play your keyboard.";
+      ? "Drag to draw · shift-drag selects · double-click a note to enter lyrics"
+      : "Draw some notes, import a file, or arm the keyboard icon and play your keyboard.";
     return;
   }
   const l = S.labels.get(n._id);
@@ -982,14 +1374,45 @@ function refreshTexts() {
 }
 
 // ---- LCD
-function flash(state, line = "") { S.flash = { state, line, until: performance.now() + 2200 }; refreshLcd(); }
+// detail: the LCD tooltip while the message shows (e.g. every warning of an import).
+function flash(state, line = "", ms = 2200, detail = "") { S.flash = { state, line, detail, until: performance.now() + ms }; refreshLcd(); }
+// ---- is the audio heard up to date with the edits?
+// status.renderedVersion is the song version the audio being played was rendered from. A render
+// follows an edit within about a second; once the audio has been behind for STALE_MS the LCD says
+// so, with what tells why in its tooltip (an older version once played over Logic, 2026-10-18), and
+// the READY tooltip keeps a tally of such stretches for the session.
+const STALE_MS = 3000;
+const stale = { since: 0, count: 0, longest: 0, last: "" };
+function trackStale(st) {
+  const behind = Number.isInteger(st.renderedVersion) && st.renderedVersion >= 0 && st.renderedVersion !== st.songVersion;
+  const now = performance.now();
+  if (behind && !stale.since) stale.since = now;
+  if (!behind && stale.since) {
+    const ms = now - stale.since;
+    if (ms > STALE_MS) { stale.count++; stale.longest = Math.max(stale.longest, ms); stale.last = new Date().toLocaleTimeString(); }
+    stale.since = 0;
+  }
+}
+const staleMs = () => (stale.since ? performance.now() - stale.since : 0);
+function staleDetail(st) {
+  const r = st.renders || {}, done = +r.secondsSinceDone;
+  return [`Playing the audio of edit ${st.renderedVersion}; the song is at edit ${st.songVersion}.`,
+    `Renders: ${r.started ?? "?"} started, ${r.cancelled ?? "?"} given up for a newer edit; the last finished ${done >= 0 ? Math.round(done) + " s ago" : "never"}.`,
+    (st.playing ? "The DAW is playing." : "Stopped.") + (st.reviewing ? " A Compare review is playing." : "")].join("\n");
+}
 let lcdCache = "";
 function refreshLcd() {
   const st = S.status;
   const vname = voiceMeta(voiceParts().preset).n;
   let state, line, cls = "";
-  if (S.flash && performance.now() < S.flash.until) ({ state, line } = S.flash);
+  const flashing = S.flash && performance.now() < S.flash.until;
+  let title = (flashing && S.flash.detail) || "";
+  if (flashing) ({ state, line } = S.flash);
   else if (st.error) { state = "ERROR"; line = st.error; cls = "err"; }
+  else if (staleMs() > STALE_MS) {
+    state = "OUT OF DATE"; line = `you're hearing an earlier edit · ${Math.round(staleMs() / 1000)} s`; cls = "err"; title = staleDetail(st);
+  }
+  else if (st.reviewing && st.playing && inDaw()) { state = "REVIEW ♪"; line = "Compare is playing, not the song"; }
   else if (!S.loaded) { state = "LOADING…"; line = "warming up the vocal cords"; }
   else if (st.rendering) { state = "RENDERING…"; line = "the singer is taking a breath"; }
   else if (st.playing) {
@@ -998,7 +1421,12 @@ function refreshLcd() {
     line = l ? (l.kind === "hum" ? "♪ mmm…" : l.kind === "hold" ? `♪ ${l.syl?.text || ""} ~` : `♪ ${l.text}`) : "♪";
     if (st.capture) cls = "rec";
   } else if (st.capture) { state = "CAPTURE ARMED"; line = st.host ? "play the DAW and your keyboard" : "press Play and your keyboard"; cls = "rec"; }
-  else { state = "READY"; line = `${vname} · ${Math.round(S.bpm)} bpm · ${S.song.notes.length} notes`; }
+  // Standalone shows the tempo as its own field at the end of this line.
+  else {
+    state = "READY"; line = `${vname} · ${st.host ? Math.round(S.bpm) + " bpm · " : ""}${S.song.notes.length} notes`;
+    if (!title && stale.count) title = `The audio fell behind the edits ${stale.count}× this session (longest ${Math.round(stale.longest / 1000)} s, last at ${stale.last}).`;
+  }
+  if (els.lcd.title !== title) els.lcd.title = title;
   const pos = fmtPos(st.beats);
   const key = state + "|" + line + "|" + pos + "|" + cls;
   if (key === lcdCache) return;
@@ -1010,7 +1438,7 @@ function refreshLcd() {
 }
 
 // ---- transport + capture
-function togglePlay() { B.setTransport(!S.status.playing); }
+function togglePlay() { phraseMode=null;B.stopAudioReview?.();B.setTransport(!S.status.playing); }
 els.play.addEventListener("click", togglePlay);
 els.capture.addEventListener("click", () => {
   const on = !S.status.capture;
@@ -1029,11 +1457,16 @@ function refreshButtons() {
   els.capture.classList.toggle("on", !!st.capture);
   els.capture.classList.toggle("live", !!(st.capture && st.playing));
   els.capture.setAttribute("aria-pressed", !!st.capture);
+  const help = $("captureHelp");
+  help.hidden = !st.capture;
+  help.textContent = st.host ? "Start playback in Logic, then play your MIDI keyboard to add notes." : "Press Play, then play your MIDI keyboard to add notes.";
   els.play.classList.toggle("on", !!st.playing);
   els.playIco.innerHTML = st.playing ? "&#9632;" : "&#9654;";
   els.playLbl.textContent = st.playing ? "Stop" : "Play";
   els.app.classList.toggle("host", !!st.host);
   els.mode.textContent = (st.host ? "In host · the DAW drives tempo and transport" : "Standalone") + (B && B.isMock ? " · mock backend" : "");
+  const version = $("version"), v = st.version ? `Novox The Robot ${st.version} · free and open source · songaday.studio/plugins` : "";
+  if (version && version.textContent !== v) version.textContent = v;
 }
 
 // ---- snap + zoom
@@ -1047,6 +1480,8 @@ $("clear").addEventListener("click", () => {
   if (!S.song.notes.length) return flash("NOTHING TO CLEAR");
   checkpoint();
   S.song.notes = [];
+  S.song.useNoteLyrics = false;
+  S.song.transcriptions = [];
   S.sel.clear();
   onSongChanged();
   flash("CLEARED", "notes removed · ⌘Z brings them back");
@@ -1056,6 +1491,9 @@ $("clear").addEventListener("click", () => {
 els.lyrics.addEventListener("input", () => {
   checkpoint("lyrics");
   S.song.lyrics = els.lyrics.value;
+  S.song.useNoteLyrics = false;
+  // Editing the lyric line switches back to flowing lyrics across notes.
+  for (const n of S.song.notes) delete n.lyric;
   onSongChanged();
 });
 
@@ -1079,15 +1517,61 @@ function buildGallery() {
     b.className = "card";
     b.setAttribute("role", "radio");
     b.dataset.voice = name;
+    b.setAttribute("aria-label", `${v.n}${v.d ? ", " + v.d : ""}`);
+    // Who's who on hover: the native tooltip, plus an in-page tag for hosts whose web view shows
+    // title tooltips late or not at all (keyboard focus shows the tag too).
     b.title = `${v.n}${v.d ? " · " + v.d : ""}`;
-    b.innerHTML = voiceSvg(v, 34) + `<span>${escapeHtml(v.n)}</span>`;
+    b.innerHTML = voiceSvg(v, 44) + `<span class="nm" aria-hidden="true">${escapeHtml(v.n)}</span>` +
+      `<span class="tip" aria-hidden="true"><b>${escapeHtml(v.n)}</b>${v.d ? ` · <i>${escapeHtml(v.d)}</i>` : ""}</span>`;
     b.addEventListener("click", () => {
       if (voiceParts().preset === name && !Object.keys(voiceParts().ov).length) return;
       checkpoint();
       setVoice(name, {});
     });
+    b.addEventListener("pointerenter", () => placeTip(b));
+    b.addEventListener("focus", () => placeTip(b));
     g.appendChild(b);
   }
+  syncGalleryChecks();
+}
+// The cast is one radio group: Tab lands on the chosen singer, arrows/Home/End choose another.
+function syncGalleryChecks() {
+  const preset = voiceParts().preset;
+  const cards = [...$("gallery").children];
+  const chosen = cards.find((c) => c.dataset.voice === preset);
+  for (const c of cards) {
+    c.setAttribute("aria-checked", c === chosen);
+    c.tabIndex = c === (chosen || cards[0]) ? 0 : -1;
+  }
+}
+$("gallery").addEventListener("keydown", (e) => {
+  const cards = [...$("gallery").children], i = cards.indexOf(document.activeElement);
+  if (i < 0 || e.metaKey || e.ctrlKey || e.altKey) return;
+  const step = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key];
+  let to = -1;
+  if (step) to = (i + step + cards.length) % cards.length;
+  else if (e.key === "Home") to = 0;
+  else if (e.key === "End") to = cards.length - 1;
+  else if (e.key === "Enter") to = i;
+  else return;
+  // Handled here, so the roll's arrow-key nudges leave the selection alone. Space stays Play/Stop,
+  // also after a click on a portrait (which focuses it).
+  e.preventDefault();
+  e.stopPropagation();
+  cards[to].focus();
+  cards[to].click();
+});
+// Centre the tag under its portrait, but keep it inside the window.
+function placeTip(card) {
+  const tip = card.querySelector(".tip");
+  if (!tip) return;
+  tip.style.left = tip.style.transform = "";
+  tip.style.display = "block";
+  const box = card.getBoundingClientRect(), width = tip.offsetWidth, room = document.documentElement.clientWidth;
+  tip.style.display = "";
+  const left = Math.max(6, Math.min(room - 6 - width, box.left + box.width / 2 - width / 2));
+  tip.style.left = `${Math.round(left - box.left)}px`;
+  tip.style.transform = "none";
 }
 const sliderEls = {};
 function buildSliders() {
@@ -1096,7 +1580,7 @@ function buildSliders() {
   for (const s of SLIDERS) {
     const row = document.createElement("div");
     row.className = "sl";
-    row.title = "Double-click to return to the preset value";
+    row.title = (s.help ? s.help + " " : "") + "Double-click to return to the preset value";
     row.innerHTML = `<label for="sl-${s.key}">${s.label}</label><input type="range" id="sl-${s.key}" min="${s.min}" max="${s.max}" step="${s.step}"><output></output>`;
     const input = row.querySelector("input");
     input.addEventListener("input", () => {
@@ -1123,15 +1607,13 @@ function syncVoiceUI() {
   if (facePreset !== preset) {
     facePreset = preset;
     $("bigface").innerHTML = voiceSvg(v, 64);
-    $("chipFace").innerHTML = voiceSvg(v, 26);
     $("vname").textContent = v.n;
     $("vsub").textContent = v.d;
-    $("chipName").textContent = v.n;
     mouthNow = "?";
     setMouth(null);
     if (!S.voices.includes(preset)) { S.voices.push(preset); buildGallery(); }
   }
-  for (const c of $("gallery").children) c.setAttribute("aria-checked", c.dataset.voice === preset);
+  syncGalleryChecks();
   const pv = presetValues(preset);
   for (const k in sliderEls) {
     const { row, input, out, s } = sliderEls[k];
@@ -1143,6 +1625,9 @@ function syncVoiceUI() {
   const n = Object.keys(ov).length;
   $("modified").textContent = n ? `${n} change${n > 1 ? "s" : ""} on ${v.n}` : "Preset settings";
   $("reset").disabled = !n;
+  const tb = $("tweakBtn");
+  tb.classList.toggle("mod", !!n);
+  tb.textContent = n ? `Tweaked (${n})` : "Tweak";
 }
 $("reset").addEventListener("click", () => {
   const { preset, ov } = voiceParts();
@@ -1150,14 +1635,6 @@ $("reset").addEventListener("click", () => {
   checkpoint();
   setVoice(preset, {});
 });
-function setPanel(open) {
-  els.app.classList.toggle("novoice", !open);
-  els.voiceChip.setAttribute("aria-expanded", open);
-  requestAnimationFrame(measure);
-}
-els.voiceChip.addEventListener("click", () => setPanel(els.app.classList.contains("novoice")));
-// In drawer mode (narrow window) clicking the roll closes the drawer.
-sc.addEventListener("pointerdown", () => { if (window.innerWidth <= 900 && !els.app.classList.contains("novoice")) setPanel(false); }, true);
 
 // ---- import (file picker or drag-and-drop)
 function toBase64(bytes) {
@@ -1165,20 +1642,145 @@ function toBase64(bytes) {
   for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
   return btoa(s);
 }
-function lyricsFromNotes(notes) {
-  if (!notes.some((n) => n.lyric && String(n.lyric).trim())) return null;
-  const toks = notes.map((n) => String(n.lyric || "").trim() || "_");
-  let out = "";
-  toks.forEach((t, i) => {
-    const prev = out.slice(-1);
-    if (t === "_" && prev === "-") out = out.slice(0, -1); // melisma inside a word
-    const glue = out && !(prev === "-" && t !== "_") ? " " : "";
-    out += glue + t;
+const audioImport = createAudioImport({
+  playAudioReview: async (...a) => B.playAudioReview ? B.playAudioReview(...a) : "Native audio output is unavailable",
+  stopAudioReview: () => B.stopAudioReview?.(),
+  audioImportStatus: (...a) => B.audioImportStatus(...a),
+  startAudioImport: (...a) => B.startAudioImport(...a),
+  cancelAudioImport: (...a) => B.cancelAudioImport(...a),
+  previewAudioImport: (...a) => B.previewAudioImport(...a),
+}, acceptRecording, flash);
+// An audio import (a file, a region dragged from the DAW, a singing take) arrives as notes in
+// seconds. With Add to song on, it joins the song at its place on the timeline (a recording with
+// no position goes to the playhead) and replaces only the notes inside its recording's span
+// (mergeImport in song-merge.js). Off, or over the starter song, it replaces the whole song at its
+// position (beat 0 without one). Either way it is one Undo step, and its recording is kept.
+// status: the transport when the recording arrived (importStatus), not after converting it.
+async function acceptRecording(score, name, result, status = null) {
+  const add = addToSong.checked;
+  const offset = importPosition(result, status || S.status, S.bpm, add);
+  // Seconds become beats at the current host tempo; never change Logic's tempo.
+  const factor = S.bpm / 60;
+  const beats = r6(Math.max(+result.duration || 0, ...score.notes.map(n => n.start + n.dur)) * factor);
+  const recordingId = String(nextId++)+"-"+Date.now();
+  const source={original:result.original,waveform:result.waveform || [],seconds:result.duration || 0,bpm:S.bpm,startBeat:offset};
+  if(B.storeSource && !await B.storeSource(recordingId,source)) throw new Error("Could not retain the source recording");
+  sourceRecordings.set(recordingId,source);
+  const merge = add && S.song.notes.length > 0 && !isStarterSong(S.song, B.starterSong);
+  // Flowing lyrics are pinned to the song's notes before the merge, which needs a plan of exactly
+  // these notes; notes that carry their own lyrics only use the plan for "~" marks.
+  const labels = merge ? await currentLabels(!S.song.useNoteLyrics) : null;
+  checkpoint();
+  const notes = score.notes.map(n => ({ pitch: clamp(Math.round(n.pitch), 0, 127), start: r6(offset+n.start*factor),
+    dur: r6(n.dur*factor), lyric: n.lyric || "", _id: nextId++ }));
+  // The import's evidence (whisper's words in transcriptWords, the notes as detected for key
+  // correction) stays with its record through save and Undo.
+  const record = {...score.transcription, recordingId, name, bpm: S.bpm,
+    originalNotes: score.notes.map(n => ({...n, start: r6(offset+n.start*factor), dur: r6(n.dur*factor)})), originalNotesUnits: "beats"};
+  const merged = mergeImport(merge ? S.song : {notes: [], transcriptions: []}, {notes, start: offset, beats, record},
+    {labels, spanOf: spanOfRecord});
+  // The notes' own syllables sing; the lyric box shows them all as text that flows back onto the
+  // same notes if edited (refined with "~" marks once the plan arrives).
+  S.song.notes = merged.notes;
+  S.song.transcriptions = merged.transcriptions;
+  S.song.useNoteLyrics = true;
+  S.song.lyrics = merged.lyrics;
+  S.sel = merge ? new Set(notes.map(n => n._id)) : new Set();
+  const shaped = shapeImport(notes, score.notes, offset + beats);
+  onSongChanged({lyrics:true});
+  if (merge) showNotes(notes); else { zoomFit(); scrollToNotes(); }
+  // A warning stays up long enough to read; the tooltip lists every one.
+  const warnings = score.transcribeWarnings || [], summary = importSummary(score, name, {added: merge, at: fmtPos(offset)});
+  const detail = [...(merge && merged.removed ? [`Replaced ${merged.removed} earlier note${merged.removed === 1 ? "" : "s"} in its span · ⌘Z undoes`] : []), ...warnings];
+  const line = [summary.line, shaped.text].filter(Boolean).join(" · ");
+  flash(summary.state, line, warnings.length ? 6000 : 2600, [shaped.detail, ...detail].filter(Boolean).join("\n"));
+}
+const keyName = (root, scale) => `${[...$("keyRoot").options].find(o => +o.value === root)?.text || "?"} ${scale}`;
+// A new import's notes onto the grid (Snap to grid, the editor's Snap setting) and into the key
+// (Snap to key), as an Undo step of its own after the import's, so one Undo returns the notes as
+// sung. The key is detected from the whole song on every import and fills in Key, unless a key
+// was chosen there by hand. imported[i] was detected as detected[i] (its detectedPitch breaks a
+// tie between the two scale notes around it). Returns {text, detail} for the import's message.
+function shapeImport(imported, detected, end) {
+  const key = detectKey(S.song.notes), kc = S.song.keyCorrection;
+  const chosen = kc && Number(kc.root) >= 0 && !kc.auto;
+  if (key && !chosen) S.song.keyCorrection = {...(kc || {}), root: key.root, scale: key.scale, mode: kc?.mode || "gentle", auto: true};
+  const settings = S.song.keyCorrection, keyed = keyImport.checked && settings && Number(settings.root) >= 0;
+  const grid = snapImport.checked ? S.snap : 0;
+  const ids = new Set(imported.map(n => n._id)), source = new Map(imported.map((n, i) => [n._id, detected[i]]));
+  const mine = S.song.notes.filter(n => ids.has(n._id));
+  let pitched = 0;
+  const shaped = mine.map(n => {
+    const pitch = keyed ? correctedPitch(n, {...settings, mode: "snap"}, source.get(n._id)) : n.pitch;
+    if (pitch !== n.pitch) pitched++;
+    return {...n, pitch};
   });
-  return out.replace(/-\s*$/, "").trim();
+  const timed = grid > 0 ? quantizeNotes(shaped, grid, {end}) : shaped;
+  const before = new Map(mine.map(n => [n._id, n]));
+  const moved = timed.filter(t => Math.abs(t.start - before.get(t._id).start) > 1e-6 || Math.abs(t.dur - before.get(t._id).dur) > 1e-6).length;
+  const named = key && !chosen ? `Key ${keyName(key.root, key.scale)}` : "";
+  if (!pitched && !moved) return {text: named, detail: ""};
+  checkpoint();  // the import as sung
+  const byId = new Map(timed.map(t => [t._id, t]));
+  for (const n of S.song.notes) { const t = byId.get(n._id); if (t) Object.assign(n, {start: t.start, dur: t.dur, pitch: t.pitch}); }
+  sortNotes(S.song.notes);
+  resolveOverlaps(ids);
+  const done = [moved ? `on the ${els.snap.selectedOptions[0]?.text || ""} grid` : "", pitched ? `${pitched} into ${keyName(settings.root, settings.scale)}` : ""];
+  return {text: [named, ...done].filter(Boolean).join(" · "), detail: "⌘Z returns the notes as sung"};
+}
+// Labels of the song's current notes, from a plan of exactly these notes: waits for one when
+// `wait` previews this exact song, otherwise null when the display plan is stale or missing.
+async function currentLabels(wait) {
+  const fresh = () => S.plan && S.planKey === notesKey(S.song);
+  if (!wait) return fresh() ? labelNotes(sortNotes([...S.song.notes]), S.plan, S.planBpm) : null;
+  const before = notesKey(S.song), bpm = S.bpm;
+  const preview = await planCandidate(S.song, bpm);
+  return notesKey(S.song) === before && S.bpm === bpm ? preview.labels : null;
+}
+// Scroll (and zoom out if needed) so these notes are in view, centred on their pitches.
+function showNotes(notes) {
+  if (!notes.length) return;
+  const first = Math.min(...notes.map(n => n.start)), last = Math.max(...notes.map(n => n.start + n.dur));
+  const room = view.w - 60;
+  if ((last - first) * S.ppb > room) S.ppb = clamp(room / (last - first + 0.5), 6, 400);
+  updateWorld();
+  if (first * S.ppb < sc.scrollLeft || last * S.ppb > sc.scrollLeft + view.w) sc.scrollLeft = Math.max(0, first * S.ppb - 40);
+  const ps = notes.map(n => n.pitch), mid = (Math.min(...ps) + Math.max(...ps)) / 2;
+  sc.scrollTop = Math.max(0, (S.hi - mid) * S.rowH - view.h / 2);
+  dirty();
+}
+// Add to song (on: imports join the song; off: they replace it) and Detailed notes (off: one note
+// per sung syllable) apply to the next audio import or singing take. They are preferences of this
+// computer, not of the song, so they stay out of the DAW state.
+const addToSong = $("addToSong"), detailedNotes = $("detailedNotes");
+try { const stored = localStorage.getItem("novox.addToSong"); if (stored !== null) addToSong.checked = stored === "1"; } catch {}
+try { detailedNotes.checked = localStorage.getItem("novox.detailedNotes") === "1"; } catch {}
+addToSong.addEventListener("change", () => {
+  try { localStorage.setItem("novox.addToSong", addToSong.checked ? "1" : "0"); } catch {}
+});
+detailedNotes.addEventListener("change", () => {
+  try { localStorage.setItem("novox.detailedNotes", detailedNotes.checked ? "1" : "0"); } catch {}
+});
+// Snap to grid (top bar, on) and Snap imports to this key (Key menu, off) shape the next import's
+// notes (shapeImport); like the other import options they belong to this computer, not the song.
+const snapImport = $("snapImport"), keyImport = $("keyImport");
+for (const [box, name] of [[snapImport, "novox.snapImport"], [keyImport, "novox.keyImport"]]) {
+  try { const stored = localStorage.getItem(name); if (stored !== null) box.checked = stored === "1"; } catch {}
+  box.addEventListener("change", () => { try { localStorage.setItem(name, box.checked ? "1" : "0"); } catch {} });
+}
+// The transport a recording without a timeline position is placed by: now, or for a singing take
+// where the playhead was when singing started (with the transport running, the take lines up with
+// what was playing). Taken when the recording arrives, as converting it takes seconds.
+let takeStatus = null; // set while a singing take records or is being handed over
+function importStatus(take = false) {
+  const status = (take && takeStatus) || { ...S.status };
+  takeStatus = null;
+  return status;
 }
 async function importFileObj(file) {
   if (!file) return;
+  if (micState.recording || micState.pending) {flash("RECORDING", "Stop singing recording before importing a file");return;}
+  if (/\.(wav|mp3|aif|aiff|m4a|flac|ogg)$/i.test(file.name)) return audioImport.open(file, S.song.voice, detailedNotes.checked, importStatus());
   flash("IMPORTING…", file.name);
   let txt = "";
   try { txt = await B.importFile(toBase64(new Uint8Array(await file.arrayBuffer())), S.song.lyrics); } catch (e) { console.warn(e); }
@@ -1189,9 +1791,11 @@ async function importFileObj(file) {
   const k = score.units === "beats" ? 1 : tempo / 60;
   const notes = score.notes.map((n) => ({ pitch: parsePitch(n.pitch), start: (+n.start || 0) * k, dur: (+n.dur || 0) * k, lyric: n.lyric }))
     .filter((n) => Number.isFinite(n.pitch) && n.dur > 0);
-  const lyr = typeof score.lyrics === "string" && score.lyrics.trim() ? score.lyrics : lyricsFromNotes(notes);
+  const lyr = typeof score.lyrics === "string" && score.lyrics.trim() ? score.lyrics : lyricsFromNotes(notes, { emptyNote: "hold" });
   checkpoint();
   S.song.notes = notes.map((n) => ({ pitch: clamp(n.pitch, 0, 127), start: Math.max(0, n.start), dur: n.dur, _id: nextId++ }));
+  S.song.useNoteLyrics = false;
+  S.song.transcriptions = [];
   if (lyr) S.song.lyrics = lyr;
   S.sel.clear();
   resolveOverlaps();
@@ -1214,15 +1818,23 @@ window.addEventListener("drop", (e) => {
   els.app.classList.remove("dragging");
   const f = e.dataTransfer?.files?.[0];
   if (f) importFileObj(f);
+  else if(B.readNativeDrop) B.readNativeDrop();
+  else flash("CAN’T IMPORT", "This region did not provide an audio or MIDI file");
 });
 
 // ===========================================================================
 // 8. status + boot
 function onStatus(s) {
+  if (s.microphone) updateMicrophone(s.microphone);
   const prev = S.status;
   const st = { ...prev, ...s };
+  // The transport starting ends a review (the plugin stops it), so a looping one does not come back.
+  if (st.playing && !prev.playing) phraseMode = null;
+  if(prev.rendering && !st.rendering && phraseMode==="robot" && $("phraseLoop").checked) setTimeout(()=>hearPhrase(false),0);
   if (st.beats == null || !Number.isFinite(+st.beats)) st.beats = 0;
   S.status = st;
+  if (st.daw || st.host) checkMmc(st, prev);
+  trackStale(st);
   if (+st.bpm > 0 && Math.abs(st.bpm - S.bpm) > 1e-3) {
     S.bpm = +st.bpm;
     relabel(); // keep labels roughly right until the new plan arrives
@@ -1254,6 +1866,14 @@ function onStatus(s) {
 
 async function boot() {
   B = await createBackend();
+  B.onScoreFileDrop?.(file=> {
+    const binary=atob(file.base64 || "");
+    importFileObj({name:file.name,arrayBuffer:async()=>Uint8Array.from(binary,c=>c.charCodeAt(0)).buffer});
+  });
+  B.onAudioFileDrop?.((file) => {
+    if (typeof file === "string") flash("CAN'T IMPORT", file);
+    else audioImport.open({name:file.name}, S.song.voice, detailedNotes.checked, importStatus(true));
+  });
   refreshButtons();
   const firstStatus = new Promise((res) => B.onStatus((s) => { res(); onStatus(s); }));
   let songTxt = "", voices = [];
@@ -1265,6 +1885,7 @@ async function boot() {
   try { parsed = songTxt ? JSON.parse(songTxt) : {}; } catch {}
   await Promise.race([firstStatus, new Promise((r) => setTimeout(r, 400))]); // learn the tempo first
   S.song = normSong(parsed);
+  await restoreSource();
   lastPushed = serialize(S.song);
   S.seenVersion = S.status.songVersion;
   S.loaded = true;
@@ -1277,10 +1898,279 @@ async function boot() {
 window.__novox = { S, H }; // for debugging from the console
 new ResizeObserver(measure).observe(els.gridwrap);
 window.addEventListener("resize", measure);
-if (window.innerWidth <= 900) setPanel(false);
 buildSliders();
 syncVoiceUI();
 refreshInfo();
 measure();
 requestAnimationFrame(frame);
 boot().catch((e) => { console.error(e); flash("ERROR", String(e && e.message || e)); });
+
+// Host windows do not always expose a familiar resize border.
+$("windowSize").addEventListener("change", async e => {
+  const sizes = {normal:[1000,660],large:[1280,800],largest:[1600,1000]};
+  const [width,height] = sizes[e.target.value] || sizes.normal;
+  if (B.setEditorSize) await B.setEditorSize(width,height);
+});
+
+function selectAllNotes() {
+  if (isTyping(document.activeElement)) return;
+  S.sel = new Set(S.song.notes.map(n=>n._id)); refreshInfo(); dirty();
+}
+window.addEventListener("novox-select-all",selectAllNotes);
+const timelineCanvas = $("timelineCanvas"), timelineToggle = $("timelineToggle");
+timelineToggle.addEventListener("click",()=>{
+  timelineCanvas.hidden = !timelineCanvas.hidden;
+  timelineToggle.setAttribute("aria-expanded",String(!timelineCanvas.hidden));
+  measure();
+});
+function timelineEnd() {
+  return Math.max(16,Math.ceil((songEnd()+4)/4)*4,(sc.scrollLeft+sc.clientWidth)/S.ppb);
+}
+function drawTimeline() {
+  const cv=$("timelineCanvas"); if (!cv || cv.hidden) return;
+  const w=cv.clientWidth,h=cv.clientHeight,c=sizeCanvas(cv,w,h,false),end=timelineEnd();
+  c.fillStyle="#fff";c.fillRect(0,0,w,h);
+  const step=Math.max(4,Math.ceil(end/Math.max(1,w/65)/4)*4);
+  c.font=`10px ${FONT}`;c.textBaseline="top";
+  for(let b=0;b<end;b+=step) {
+    const x=b/end*w;c.fillStyle="#ddd";c.fillRect(x,0,1,h);
+    c.fillStyle="#555";c.fillText(String(b/4+1),x+3,2);
+  }
+  // Each imported recording, where it still stands behind the notes: a grey bar along the bottom.
+  const records=songTranscriptions(S.song);
+  visibleSourceRanges(records,spanOfRecord).forEach((ranges,k)=>{
+    if(!sourceRecordings.get(records[k].recordingId)?.original) return;
+    c.fillStyle="#9aa6b0";
+    for(const [a,b] of ranges) c.fillRect(a/end*w,h-6,Math.max(2,(b-a)/end*w-1),3);
+  });
+  const lo=Math.min(48,...S.song.notes.map(n=>n.pitch)),hi=Math.max(72,...S.song.notes.map(n=>n.pitch));
+  for(const n of S.song.notes) {
+    c.fillStyle=S.sel.has(n._id)?"#1f5fae":"#73a9d4";
+    c.fillRect(n.start/end*w,18+(hi-n.pitch)/(hi-lo+1)*(h-25),Math.max(2,n.dur/end*w),4);
+  }
+  c.strokeStyle="#1f5fae";c.lineWidth=2;
+  c.strokeRect(sc.scrollLeft/S.ppb/end*w+1,1,Math.min(w-2,sc.clientWidth/S.ppb/end*w)-2,h-2);
+  c.fillStyle="#a32929";c.fillRect(S.status.beats/end*w,0,1,h);
+}
+function navigateTimeline(e) {
+  const rect=timelineCanvas.getBoundingClientRect();
+  const beat=clamp((e.clientX-rect.left)/rect.width,0,1)*timelineEnd();
+  sc.scrollLeft=Math.max(0,beat*S.ppb-sc.clientWidth/2);dirty();
+}
+timelineCanvas.addEventListener("pointerdown",e=>{timelineCanvas.focus();timelineCanvas.setPointerCapture(e.pointerId);navigateTimeline(e);});
+timelineCanvas.addEventListener("pointermove",e=>{if(timelineCanvas.hasPointerCapture(e.pointerId))navigateTimeline(e);});
+timelineCanvas.addEventListener("keydown",e=>{
+  if(e.key==="ArrowLeft" || e.key==="ArrowRight") {e.preventDefault();e.stopPropagation();sc.scrollLeft+= (e.key==="ArrowLeft"?-1:1)*4*S.ppb;dirty();}
+});
+
+// Singing capture uses native input in both standalone and plugin modes.
+let micState = {recording:false,pending:false}, micStopping=false, lastMicError="";
+function updateMicrophone(state) {
+  micState=state;
+  const button=$("singCapture"),active=state.recording || state.pending;
+  button.classList.toggle("on",active);button.setAttribute("aria-pressed",String(active));
+  button.disabled=!!state.pending || micStopping;
+  els.capture.disabled=active;
+  $("singHelp").hidden=!active;
+  $("singCancel").disabled=!!state.pending;
+  $("singLevel").value=state.level || 0;
+  $("singMessage").textContent=state.pending ? "Allow microphone access to record your singing." : `Sing, then click the singing icon to stop and convert · ${Math.floor(state.seconds || 0)}s / 60s`;
+  if(state.error && state.error!==lastMicError) {takeStatus=null;flash("CAN’T RECORD",state.error);}
+  lastMicError=state.error || "";
+  if(state.full && !micStopping) stopSinging();
+}
+async function stopSinging() {
+  if(micStopping) return;
+  micStopping=true;$("singCapture").disabled=true;
+  try {
+    const reply=await B.stopMicrophone();
+    if(typeof reply==="string" && reply) {takeStatus=null;flash("CAN’T RECORD",reply);}
+  } catch(e) {takeStatus=null;flash("CAN’T RECORD",String(e));}
+  finally {micStopping=false;}
+}
+$("singCapture").addEventListener("click",async()=>{
+  if(micState.recording) return stopSinging();
+  if(!B.startMicrophone) {flash("MICROPHONE UNAVAILABLE","Singing capture is available in the native app and plugin");return;}
+  if(S.status.capture) {S.status.capture=false;B.setCapture(false);refreshButtons();}
+  try {
+    updateMicrophone({pending:true});takeStatus={...S.status};
+    const reply=await B.startMicrophone();
+    if(typeof reply==="string" && reply) {takeStatus=null;updateMicrophone({recording:false,pending:false});flash("CAN’T RECORD",reply);}
+  } catch(e) {takeStatus=null;updateMicrophone({recording:false,pending:false});flash("CAN’T RECORD",String(e));}
+});
+$("singCancel").addEventListener("click",async()=>{
+  if(micState.pending) return;
+  await B.cancelMicrophone?.();takeStatus=null;updateMicrophone({recording:false,pending:false});flash("RECORDING CANCELLED");
+});
+
+
+// Source recordings remain in this editor session, keyed so Undo restores the right sources.
+const sourceRecordings = new Map();
+const spanOfRecord = (record) => importSpan(record, sourceRecordings.get(record.recordingId));
+let phraseMode=null;
+function phraseBounds() {
+  const selected=S.song.notes.filter(n=>S.sel.has(n._id));
+  const notes=selected.length ? selected : S.song.notes;
+  return notes.length ? [Math.min(...notes.map(n=>n.start)),Math.max(...notes.map(n=>n.start+n.dur))] : [0,0];
+}
+// The original recordings under the roll, each import at its own place: the part of it that still
+// stands behind the notes (later imports replaced the rest), with a blue tick where it starts.
+function drawSourceWave() {
+  const records=songTranscriptions(S.song), sources=records.map(r=>sourceRecordings.get(r.recordingId));
+  const any=sources.some(source=>source?.original);
+  $("hearOriginal").disabled=!any;
+  const [begin,end]=phraseBounds();
+  $("phraseRange").textContent=S.sel.size ? `Selected phrase · ${begin.toFixed(1)}–${end.toFixed(1)} beats` : "Whole song · select notes for a phrase";
+  const canvas=$("sourceWave");canvas.hidden=!any;
+  if(!any) return;
+  const width=Math.max(1,Math.round(els.scroller.getBoundingClientRect().right-canvas.getBoundingClientRect().left)),height=40;canvas.style.width=width+"px";canvas.width=width;canvas.height=height;
+  const c=canvas.getContext("2d");c.clearRect(0,0,width,height);
+  // Match the roll's left keyboard gutter and horizontal scrolling.
+  const gutter=els.scroller.getBoundingClientRect().left-canvas.getBoundingClientRect().left;
+  const xOf=b=>gutter+b*S.ppb-els.scroller.scrollLeft;
+  const firstBeat=(els.scroller.scrollLeft-1)/S.ppb, lastBeat=firstBeat+(width-gutter+2)/S.ppb;
+  const live=visibleSourceRanges(records,spanOfRecord);
+  records.forEach((record,k)=>{
+    const source=sources[k], span=spanOfRecord(record);
+    if(!source?.original || !span) return;
+    const peaks=source.waveform || [], beats=span[1]-span[0], count=peaks.length;
+    if(count) {
+      const w=Math.max(1,beats*S.ppb/count);
+      c.fillStyle="#677784";
+      for(const [a,b] of live[k]) {
+        const from=Math.max(a,firstBeat), to=Math.min(b,lastBeat);
+        if(to<=from) continue;
+        for(let i=Math.max(0,Math.floor((from-span[0])/beats*count));i<Math.min(count,Math.ceil((to-span[0])/beats*count));i++) {
+          const x=xOf(span[0]+i/count*beats);
+          if(x<gutter || x>width) continue;
+          const h=Math.max(1,Number(peaks[i])*36);c.fillRect(x,20-h/2,w,h);
+        }
+      }
+    }
+    const x0=Math.round(xOf(span[0]));
+    if(live[k].length && x0>=gutter && x0<=width) {c.fillStyle="#3b8ee8";c.fillRect(x0,3,1,34);}
+  });
+  c.strokeStyle="#a0a0a0";c.beginPath();c.moveTo(gutter,20);c.lineTo(width,20);c.stroke();
+}
+async function hearPhrase(original) {
+  const [begin,end]=phraseBounds();if(end<=begin) return flash("SELECT A PHRASE","Add notes before listening");
+  if(S.status.playing) return flash("STOP PLAYBACK","Stop playback before comparing a phrase");
+  const loop=$("phraseLoop").checked;
+  try {
+    let error;
+    if(original) {
+      // Each import's recording under the phrase, at its own place (mixed where they overlap).
+      const pieces=originalSegments(songTranscriptions(S.song),id=>sourceRecordings.get(id),begin,end);
+      if(!pieces.length) return flash("NO RECORDING","No original recording lies under these notes");
+      error=B.playSourceReview ? await B.playSourceReview(pieces,loop) : "Phrase listening requires the native app or plugin";
+    } else error=B.playSongReview ? await B.playSongReview(begin,end,loop) : "Phrase listening requires the native app or plugin";
+    if(error) flash("CAN’T PLAY",error);
+    else phraseMode=original ? "original" : "robot";
+  } catch(e) {flash("CAN’T PLAY",String(e));}
+}
+$("hearOriginal").addEventListener("click",()=>hearPhrase(true));
+$("hearRobot").addEventListener("click",()=>hearPhrase(false));
+$("hearStop").addEventListener("click",()=>{phraseMode=null;B.stopAudioReview?.();});
+$("phraseLoop").addEventListener("change",()=>{phraseMode=null;B.stopAudioReview?.();});
+
+// Fetch the recordings of the song's imports that this editor hasn't seen (a reopened editor,
+// a loaded project or song file).
+async function restoreSource() {
+  if(!B.getSource) return;
+  const ids=new Set(songTranscriptions(S.song).map(t=>t.recordingId).filter(id=>id && !sourceRecordings.has(id)));
+  for(const id of ids) {const source=await B.getSource(id);if(source?.original) sourceRecordings.set(id,source);}
+  if(ids.size) dirty();
+}
+for(const button of document.querySelectorAll("[data-file-action]")) {
+  const action=button.dataset.fileAction;
+  button.addEventListener(action.startsWith("drag") ? "pointerdown" : "click",async e=>{
+    if(action.startsWith("drag")) e.preventDefault();
+    if(!B.fileAction) return flash("NATIVE APP REQUIRED","File export is available in the app and plugin");
+    try {clearTimeout(pushTimer);await pushNow();const error=await B.fileAction(action);if(error && error!=="cancelled") flash("CAN’T SAVE",error);else if(!error && !action.startsWith("drag")) flash("FILE READY");}catch(e) {flash("FILE ERROR",String(e));}
+  });
+}
+
+
+// Pin flowing lyrics before local surgery so later words keep their assignments.
+function pinNoteLyrics() {
+  if(S.song.useNoteLyrics) return true;
+  if(!S.plan) {flash("WAIT FOR LYRICS","The singer is still assigning words to notes");return false;}
+  for(const n of S.song.notes) n.lyric=pinnedLyric(S.labels.get(n._id));
+  S.song.useNoteLyrics=true;return true;
+}
+let syllableNoteId=null;
+$("splitSyllables").addEventListener("click",()=>{
+  const selected=selectedNotes();if(selected.length!==1) return flash("SELECT ONE NOTE","Choose the note containing the word to split");
+  syllableNoteId=selected[0]._id;$("syllableText").value=selected[0].lyric || S.labels.get(syllableNoteId)?.text || "";
+  $("syllableDialog").showModal();$("syllableText").focus();$("syllableText").select();
+});
+$("syllableDialog").addEventListener("close",()=>{
+  if($("syllableDialog").returnValue!=="apply") return;
+  const parts=$("syllableText").value.trim().split(/[-\s]+/).filter(Boolean);
+  const note=S.song.notes.find(n=>n._id===syllableNoteId);
+  if(!note || parts.length<2 || parts.length>16 || note.dur/parts.length<.03125) return flash("CHECK SYLLABLES","Enter two or more syllables separated by hyphens");
+  checkpoint();if(!pinNoteLyrics()) {dropNoopCheckpoint();return;}const duration=note.dur/parts.length;
+  const replacements=parts.map((part,i)=>({...note,_id:nextId++,start:note.start+i*duration,dur:duration,lyric:part+(i<parts.length-1?"-":"")}));
+  S.song.notes=S.song.notes.filter(n=>n._id!==note._id).concat(replacements).sort((a,b)=>a.start-b.start);
+  S.sel=new Set(replacements.map(n=>n._id));onSongChanged();flash("SYLLABLES SPLIT",`${parts.length} notes · drag their edges to adjust timing`);
+});
+$("joinSyllables").addEventListener("click",()=>{
+  const notes=selectedNotes().sort((a,b)=>a.start-b.start);
+  if(notes.length<2) return flash("SELECT NOTES","Select adjacent notes of the same pitch to join");
+  const begin=notes[0].start,end=Math.max(...notes.map(n=>n.start+n.dur));
+  if(notes.some(n=>n.pitch!==notes[0].pitch) || S.song.notes.some(n=>!S.sel.has(n._id) && n.start<end && n.start+n.dur>begin)) return flash("CAN’T JOIN","Choose adjacent notes of the same pitch");
+  checkpoint();if(!pinNoteLyrics()) {dropNoopCheckpoint();return;}
+  let lyric="";for(const n of notes) {const token=n.lyric || "";if(!token || token==="_") continue;lyric=lyric.endsWith("-") ? lyric.slice(0,-1)+token : lyric+(lyric?" ":"")+token;}lyric=lyric.replace(/-$/," ").trim();
+  const merged={...notes[0],start:begin,dur:end-begin,lyric};S.song.notes=S.song.notes.filter(n=>!S.sel.has(n._id)).concat([merged]).sort((a,b)=>a.start-b.start);
+  S.sel=new Set([merged._id]);onSongChanged();flash("NOTES JOINED");
+});
+function moveLyric(direction) {
+  const selected=selectedNotes();if(selected.length!==1) return flash("SELECT ONE NOTE","Choose the lyric to move");
+  const notes=[...S.song.notes].sort((a,b)=>a.start-b.start),index=notes.findIndex(n=>n._id===selected[0]._id),target=notes[index+direction];
+  if(!target) return flash("END OF SONG");checkpoint();if(!pinNoteLyrics()) {dropNoopCheckpoint();return;}
+  [selected[0].lyric,target.lyric]=[target.lyric || "",selected[0].lyric || ""];
+  S.sel=new Set([target._id]);onSongChanged();flash("LYRICS SWAPPED");
+}
+$("lyricLeft").addEventListener("click",()=>moveLyric(-1));$("lyricRight").addEventListener("click",()=>moveLyric(1));
+
+$("syllableText").addEventListener("keydown",e=>{if(e.key==="Enter") {e.preventDefault();$("syllableDialog").close("apply");}});
+
+// ===========================================================================
+// Popovers: Export, Tweak (voice), Key, Edit, Compare, View. A [data-pop] button toggles the
+// element it names; a click outside or Escape closes it; [data-close] items close it after acting.
+let openPop = null;
+function closePop(focusButton = false) {
+  if (!openPop) return;
+  const { btn, pop } = openPop;
+  openPop = null;
+  pop.hidden = true;
+  btn.setAttribute("aria-expanded", "false");
+  btn.classList.remove("open");
+  if (focusButton) btn.focus();
+}
+function openPopFor(btn) {
+  closePop();
+  const pop = $(btn.dataset.pop);
+  pop.hidden = false;
+  btn.setAttribute("aria-expanded", "true");
+  btn.classList.add("open");
+  openPop = { btn, pop };
+}
+for (const btn of document.querySelectorAll("[data-pop]")) {
+  btn.setAttribute("aria-expanded", "false");
+  btn.setAttribute("aria-controls", btn.dataset.pop);
+  btn.addEventListener("click", () => (openPop && openPop.btn === btn ? closePop() : openPopFor(btn)));
+}
+for (const item of document.querySelectorAll(".pop [data-close]")) item.addEventListener("click", () => closePop());
+document.addEventListener("pointerdown", (e) => {
+  if (openPop && !openPop.pop.contains(e.target) && !openPop.btn.contains(e.target)) closePop();
+}, true);
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && openPop && !document.querySelector("dialog[open]")) { e.stopPropagation(); closePop(true); }
+}, true);
+// index.html#voices opens the voice tweaks, #pop=<id> any popover (for screenshots and docs).
+{
+  const m = /^#(?:pop=([\w-]+)|(voices))$/.exec(location.hash);
+  const btn = m && document.querySelector(`[data-pop="${m[2] ? "tweakPop" : m[1]}"]`);
+  if (btn) openPopFor(btn);
+}

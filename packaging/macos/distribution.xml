@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Installer for Novox The Robot @LABEL@ (scripts/package-mac.sh fills in @LABEL@, @VERSION@ and
+     @MIN_MACOS@). Apple Silicon, all three parts chosen by default. -->
+<installer-gui-script minSpecVersion="2">
+  <title>Novox The Robot @LABEL@</title>
+  <welcome file="welcome.html" mime-type="text/html"/>
+  <license file="license.txt"/>
+  <conclusion file="conclusion.html" mime-type="text/html"/>
+  <options customize="allow" require-scripts="false" hostArchitectures="arm64"/>
+  <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+  <allowed-os-versions><os-version min="@MIN_MACOS@"/></allowed-os-versions>
+  <choices-outline>
+    <line choice="app"/>
+    <line choice="au"/>
+    <line choice="vst3"/>
+  </choices-outline>
+  <choice id="app" title="Novox The Robot app" description="The standalone app, in Applications. No DAW needed.">
+    <pkg-ref id="com.songaday.novox.app"/>
+  </choice>
+  <choice id="au" title="Audio Unit (Logic Pro, GarageBand)" description="Novox The Robot as an instrument plugin, in /Library/Audio/Plug-Ins/Components.">
+    <pkg-ref id="com.songaday.novox.au"/>
+  </choice>
+  <choice id="vst3" title="VST3 (Ableton Live, Reaper, others)" description="Novox The Robot as an instrument plugin, in /Library/Audio/Plug-Ins/VST3.">
+    <pkg-ref id="com.songaday.novox.vst3"/>
+  </choice>
+  <pkg-ref id="com.songaday.novox.app" version="@VERSION@" onConclusion="none">app.pkg</pkg-ref>
+  <pkg-ref id="com.songaday.novox.au" version="@VERSION@" onConclusion="none">au.pkg</pkg-ref>
+  <pkg-ref id="com.songaday.novox.vst3" version="@VERSION@" onConclusion="none">vst3.pkg</pkg-ref>
+</installer-gui-script>

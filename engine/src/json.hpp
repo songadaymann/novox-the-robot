@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "utf8.hpp"
+
 namespace novox::json {
 
 struct Value {
@@ -144,17 +146,17 @@ class Parser {
           if (i_ + 4 > s_.size()) fail("bad unicode escape");
           unsigned cp = std::stoul(s_.substr(i_, 4), nullptr, 16);
           i_ += 4;
-          // Encode as UTF-8 (BMP only; lyrics rarely need more).
-          if (cp < 0x80) {
-            out += static_cast<char>(cp);
-          } else if (cp < 0x800) {
-            out += static_cast<char>(0xC0 | (cp >> 6));
-            out += static_cast<char>(0x80 | (cp & 0x3F));
-          } else {
-            out += static_cast<char>(0xE0 | (cp >> 12));
-            out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
-            out += static_cast<char>(0x80 | (cp & 0x3F));
+          // Characters beyond the BMP (emoji) arrive as a surrogate pair, as
+          // JSON writers such as Python's json.dumps escape them; encoding each
+          // half on its own would be invalid UTF-8. A lone half becomes U+FFFD.
+          if (cp >= 0xD800 && cp <= 0xDBFF && i_ + 6 <= s_.size() && s_[i_] == '\\' && s_[i_ + 1] == 'u') {
+            const unsigned low = std::stoul(s_.substr(i_ + 2, 4), nullptr, 16);
+            if (low >= 0xDC00 && low <= 0xDFFF) {
+              cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+              i_ += 6;
+            }
           }
+          utf8Append(out, cp);
           break;
         }
         default: out += e;

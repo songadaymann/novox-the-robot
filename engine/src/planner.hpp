@@ -48,6 +48,15 @@ struct Plan {
 
 Plan planScore(const Score& score, const Lexicon& lexicon);
 
+// One lyric token per note, using the planner's dictionary and exact flow rules.
+// Empty tokens finish an automatically split word (or represent a lone "~").
+std::vector<std::string> lyricFlowTokens(const std::string& line, const Lexicon& lexicon);
+
+// True when consonants p[from, to) may begin an English syllable: any single
+// consonant, or a cluster from the planner's onset list ("S T R", "P L", ...).
+// The planner and the sung-syllable inventory both split words by maximal onset.
+bool legalOnset(const Pronunciation& p, size_t from, size_t to);
+
 // JSON dump of a plan (segments, syllables, warnings) for inspection.
 std::string planToJson(const Plan& plan);
 

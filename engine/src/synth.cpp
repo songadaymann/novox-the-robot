@@ -159,13 +159,30 @@ class VoiceRenderer {
     }
     // Fricative noise rolls off above ~9 kHz, so S doesn't become a hiss.
     fricLp_.lowpass(std::min(9000.0, sr * 0.45), 0.707, sr);
+    findSilentSpans();
   }
 
   // Adds the next n samples into out. Control parameters update on absolute
   // kBlock boundaries, so any chunking produces identical audio.
   void process(float* out, size_t n) {
     const double dt = kBlock / sr_;
-    for (size_t i = 0; i < n; ++i, ++pos_) {
+    for (size_t i = 0; i < n;) {
+      // Rest positions are retained in the output; only the inaudible work is
+      // skipped. Carry the chosen end across process() calls so a host's block
+      // size cannot change either the reset point or the next attack.
+      if (pos_ < silentUntil_) {
+        size_t skip = std::min(n - i, silentUntil_ - pos_);
+        pos_ += skip;
+        i += skip;
+        continue;
+      }
+      while (silentSpan_ < silentSpans_.size() && pos_ >= silentSpans_[silentSpan_].end) ++silentSpan_;
+      if (pos_ % kBlock == 0 && silentSpan_ < silentSpans_.size() &&
+          pos_ >= silentSpans_[silentSpan_].start && inaudibleTail()) {
+        clearSilentState();
+        silentUntil_ = silentSpans_[silentSpan_].end;
+        continue;
+      }
       if (!configured_ || pos_ % kBlock == 0) {
         size_t block = pos_ - pos_ % kBlock;
         double t = (static_cast<double>(block) + kBlock / 2.0) / sr_ - delay_;
@@ -175,6 +192,8 @@ class VoiceRenderer {
         configured_ = true;
       }
       out[i] += static_cast<float>(sample(p_, f0_));
+      ++i;
+      ++pos_;
     }
   }
 
@@ -188,6 +207,9 @@ class VoiceRenderer {
   double delay_;
   size_t pos_ = 0;
   bool configured_ = false;
+  struct SilentSpan { size_t start, end; };
+  std::vector<SilentSpan> silentSpans_;
+  size_t silentSpan_ = 0, silentUntil_ = 0;
   Params p_{};
   double f0_ = 0;
 
@@ -216,6 +238,75 @@ class VoiceRenderer {
   // Per-block amplitudes (smoothed per sample to avoid zipper noise)
   double av_ = 0, ah_ = 0, af_ = 0, ab_ = 0, na_[3] = {0, 0, 0};
   double avT_ = 0, ahT_ = 0, afT_ = 0, abT_ = 0, naT_[3] = {0, 0, 0};
+
+  void findSilentSpans() {
+    // Silence can be split into two segments with different formants by the
+    // planner. Treat the run as one rest, never a closure or an unvoiced sound.
+    const auto& segs = plan_.segments;
+    auto silent = [](const Segment& s) {
+      if (s.kind != SegKind::Silence) return false;
+      // Relative noise-band gains may be retained from S/F/Z in silenceLike.
+      // They cannot produce sound when the frication source gate AF is zero.
+      return s.p[AV] == 0.0f && s.p[AH] == 0.0f && s.p[AF] == 0.0f && s.p[AB] == 0.0f;
+    };
+    for (size_t i = 0; i < segs.size();) {
+      if (!silent(segs[i])) { ++i; continue; }
+      size_t last = i;
+      while (last + 1 < segs.size() && silent(segs[last + 1]) &&
+             std::fabs(segs[last].end - segs[last + 1].start) < 1e-9) ++last;
+      const double start = segs[i].start;
+      const double end = segs[last].end;
+      if (end - start >= 0.5) {
+        // Always render releases for at least 300 ms, then additionally require
+        // every audible filter state to have decayed below -240 dB. An initial
+        // rest has no preceding sound. Warm up 50 ms before the *transition*
+        // into the next segment, which may be a consonant before its note.
+        const double release = i == 0 && start <= 0.0 ? 0.0 : std::max(0.3, segs[i].tAmp * 0.5);
+        const double transition = last + 1 < segs.size()
+            ? std::max(segs[last + 1].tAmp, segs[last + 1].tFreq) * 0.5 : 0.0;
+        const double from = std::max(0.0, (start + release + delay_) * sr_);
+        const double to = std::max(0.0, (end - transition - 0.05 + delay_) * sr_ - kBlock);
+        const size_t firstBlock = static_cast<size_t>(std::ceil(from / kBlock)) * kBlock;
+        const size_t lastBlock = static_cast<size_t>(std::floor(to / kBlock)) * kBlock;
+        if (firstBlock < lastBlock) silentSpans_.push_back({firstBlock, lastBlock});
+      }
+      i = last + 1;
+    }
+  }
+
+  bool inaudibleTail() const {
+    auto quiet = [](double x) { return std::fabs(x) <= 1e-12; };
+    auto resonatorQuiet = [&](const Resonator& r) { return quiet(r.y1) && quiet(r.y2); };
+    auto biquadQuiet = [&](const Biquad& b) { return quiet(b.z1) && quiet(b.z2); };
+    if (!quiet(av_) || !quiet(ah_) || !quiet(af_) || !quiet(ab_) ||
+        !quiet(avT_) || !quiet(ahT_) || !quiet(afT_) || !quiet(abT_) ||
+        !quiet(nasalZero_.x1) || !quiet(nasalZero_.x2) || !resonatorQuiet(nasalPole_) ||
+        !biquadQuiet(fricLp_) || !biquadQuiet(singer_) || !quiet(dcX_) || !quiet(dcY_)) return false;
+    for (const auto& r : formant_) if (!resonatorQuiet(r)) return false;
+    for (const auto& r : highFormant_) if (!resonatorQuiet(r)) return false;
+    if (useBandLimit_) for (const auto& b : bandLimit_) if (!biquadQuiet(b)) return false;
+    for (int i = 0; i < v_.eqBands; ++i) if (!biquadQuiet(eq_[i])) return false;
+    return true;
+  }
+
+  void clearSilentState() {
+    auto clearResonator = [](Resonator& r) { r.y1 = r.y2 = 0; };
+    auto clearBiquad = [](Biquad& b) { b.z1 = b.z2 = 0; };
+    for (auto& r : formant_) clearResonator(r);
+    for (auto& r : highFormant_) clearResonator(r);
+    clearResonator(nasalPole_);
+    nasalZero_.x1 = nasalZero_.x2 = 0;
+    for (auto& b : noiseBand_) clearBiquad(b);
+    for (auto& b : bandLimit_) clearBiquad(b);
+    for (auto& b : eq_) clearBiquad(b);
+    clearBiquad(fricLp_);
+    clearBiquad(singer_);
+    phase_ = tiltState_ = noiseLp_ = dcX_ = dcY_ = 0;
+    periodJitter_ = 1;
+    av_ = ah_ = af_ = ab_ = avT_ = ahT_ = afT_ = abT_ = 0;
+    for (int i = 0; i < 3; ++i) na_[i] = naT_[i] = 0;
+    configured_ = false;
+  }
 
   Params paramsAt(double t) {
     const auto& segs = plan_.segments;

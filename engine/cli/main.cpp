@@ -39,6 +39,55 @@ bool writeWav(const std::string& path, const float* data, size_t count, int rate
   return static_cast<bool>(f);
 }
 
+// Minimal WAV reader (PCM 16/24/32-bit or float 32), mixed down to mono.
+bool readWav(const std::string& path, std::vector<float>& out, double& rate, std::string& error) {
+  std::string d;
+  {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) { error = "could not read " + path; return false; }
+    std::stringstream ss;
+    ss << f.rdbuf();
+    d = ss.str();
+  }
+  auto u16 = [&](size_t p) { return static_cast<uint16_t>(static_cast<uint8_t>(d[p]) | static_cast<uint8_t>(d[p + 1]) << 8); };
+  auto u32 = [&](size_t p) { return static_cast<uint32_t>(u16(p)) | static_cast<uint32_t>(u16(p + 2)) << 16; };
+  if (d.size() < 12 || d.compare(0, 4, "RIFF") || d.compare(8, 4, "WAVE")) { error = "not a WAV file"; return false; }
+  int format = 0, channels = 0, bits = 0;
+  size_t p = 12, dataPos = 0, dataLen = 0;
+  while (p + 8 <= d.size()) {
+    const std::string id = d.substr(p, 4);
+    const size_t len = u32(p + 4);
+    if (id == "fmt ") {
+      format = u16(p + 8); channels = u16(p + 10); rate = u32(p + 12); bits = u16(p + 22);
+      if (format == 0xFFFE && len >= 26) format = u16(p + 32);  // WAVE_FORMAT_EXTENSIBLE
+    } else if (id == "data") {
+      dataPos = p + 8; dataLen = std::min(len, d.size() - dataPos);
+    }
+    p += 8 + len + (len & 1);
+  }
+  if (!dataPos || channels < 1) { error = "WAV has no audio data"; return false; }
+  const int bytes = bits / 8;
+  const size_t frames = dataLen / static_cast<size_t>(bytes * channels);
+  out.assign(frames, 0.0f);
+  for (size_t i = 0; i < frames; ++i) {
+    double sum = 0;
+    for (int c = 0; c < channels; ++c) {
+      const size_t q = dataPos + (i * channels + c) * bytes;
+      double v = 0;
+      if (format == 3 && bits == 32) { float fv; std::memcpy(&fv, d.data() + q, 4); v = fv; }
+      else if (bits == 16) v = static_cast<int16_t>(u16(q)) / 32768.0;
+      else if (bits == 24) v = static_cast<int32_t>((static_cast<uint32_t>(static_cast<uint8_t>(d[q])) << 8 |
+                                                     static_cast<uint32_t>(static_cast<uint8_t>(d[q + 1])) << 16 |
+                                                     static_cast<uint32_t>(static_cast<uint8_t>(d[q + 2])) << 24)) / 2147483648.0;
+      else if (bits == 32) v = static_cast<int32_t>(u32(q)) / 2147483648.0;
+      else { error = "unsupported WAV sample format"; return false; }
+      sum += v;
+    }
+    out[i] = static_cast<float>(sum / channels);
+  }
+  return true;
+}
+
 std::string readFile(const std::string& path) {
   std::ifstream f(path, std::ios::binary);
   if (!f) return "";
@@ -77,6 +126,8 @@ void usage() {
                "             [--lyrics \"hel-lo world\"] [--track N]\n"
                "  novox import <song.mid|song.musicxml> [-o score.json] [--lyrics ...] [--track N]\n"
                "  novox plan <score.json|song.mid|song.musicxml>\n"
+               "  novox transcribe <take.wav> [-o score.json] [--words words.json] [--algorithm legacy|singing-v1|singing-v2]\n"
+               "             [--detail natural|detailed]  (singing-v2: also split held approaches, grace notes, droops)\n"
                "  novox say \"words to sing\" -o <out.wav> [--pitch C4] [--beats 1] [--tempo 100] [--voice NAME]\n"
                "  novox phonemes \"words\"\n"
                "  novox voices\n"
@@ -91,7 +142,7 @@ int main(int argc, char** argv) {
     return 1;
   }
   std::string cmd = argv[1];
-  std::string input, out = "out.wav", voice, dict, pitch = "C4", lyrics;
+  std::string input, out = "out.wav", voice, dict, pitch = "C4", lyrics, wordsPath, algorithm = "legacy", detail = "natural";
   double rate = 48000, beats = 1, tempo = 100;
   int track = -1;
   bool outGiven = false;
@@ -103,6 +154,9 @@ int main(int argc, char** argv) {
       outGiven = true;
     } else if (a == "--lyrics") lyrics = next();
     else if (a == "--track") track = std::atoi(next().c_str());
+    else if (a == "--algorithm") algorithm = next();
+    else if (a == "--detail") detail = next();
+    else if (a == "--words") wordsPath = next();
     else if (a == "--voice") voice = next();
     else if (a == "--dict") dict = next();
     else if (a == "--rate") rate = std::atof(next().c_str());
@@ -128,7 +182,33 @@ int main(int argc, char** argv) {
   }
 
   int status = 0;
-  if (cmd == "phonemes") {
+  if (cmd == "transcribe") {
+    // Sung WAV -> score JSON (melody; lyrics too with --words from a speech recognizer).
+    std::vector<float> audio;
+    double wavRate = 0;
+    std::string err;
+    if (!readWav(input, audio, wavRate, err)) {
+      std::cerr << "error: " << err << "\n";
+      novox_destroy(e);
+      return 1;
+    }
+    std::string words = wordsPath.empty() ? "" : readFile(wordsPath);
+    if (algorithm != "legacy" && algorithm != "singing-v1" && algorithm != "singing-v2") { std::cerr << "Unknown transcription algorithm\n"; novox_destroy(e); return 1; }
+    if (detail != "natural" && detail != "detailed") { std::cerr << "Unknown transcription detail\n"; novox_destroy(e); return 1; }
+    const std::string options = "{\"algorithm\":\"" + algorithm + "\",\"detail\":\"" + detail + "\"}";
+    char* json = novox_transcribe(e, audio.data(), audio.size(), wavRate, words.empty() ? nullptr : words.c_str(), options.c_str());
+    if (!json) {
+      std::cerr << "error: " << novox_last_error(e) << "\n";
+      status = 1;
+    } else if (outGiven) {
+      std::ofstream(out) << json;
+      std::cerr << "wrote " << out << "\n";
+      novox_free(json);
+    } else {
+      std::cout << json;
+      novox_free(json);
+    }
+  } else if (cmd == "phonemes") {
     char* p = novox_phonemize(e, input.c_str());
     std::cout << p << "\n";
     novox_free(p);

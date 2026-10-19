@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
-project(NovoxTheRobot VERSION 0.1.0 LANGUAGES C CXX)
+project(NovoxTheRobot VERSION 1.0.0 LANGUAGES C CXX)
+# What people see (the installer, the download page, the editor): the version plus a stage.
+set(NOVOX_VERSION_LABEL "1.0 beta" CACHE STRING "Release name shown to people")
+if(APPLE)
+  enable_language(OBJC OBJCXX)
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,12 +14,18 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 set(NOVOX_SOURCES
+  engine/src/articulation.cpp
   engine/src/import.cpp
   engine/src/lexicon.cpp
   engine/src/phonemes.cpp
   engine/src/planner.cpp
   engine/src/score.cpp
+  engine/src/singing_pitch.cpp
+  engine/src/singing_segment.cpp
+  engine/src/spectrum.cpp
+  engine/src/syllables.cpp
   engine/src/synth.cpp
+  engine/src/transcribe.cpp
   engine/src/voice.cpp
   engine/src/novox.cpp
 )
@@ -76,7 +87,8 @@ endif()
 # Tests: `ctest --test-dir build` (or run build/novox_tests).
 if(NOVOX_BUILD_TESTS)
   enable_testing()
-  add_executable(novox_tests tests/engine_tests.cpp)
+  add_executable(novox_tests tests/engine_tests.cpp tests/singing_pitch_tests.cpp tests/singing_segment_tests.cpp
+                             tests/syllables_tests.cpp)
   target_link_libraries(novox_tests PRIVATE novox_static)
   target_include_directories(novox_tests PRIVATE engine/src)
   target_compile_definitions(novox_tests PRIVATE NOVOX_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
@@ -91,7 +103,7 @@ endif()
 
 # WebAssembly module for the JavaScript package (emcmake cmake -B build-wasm ...).
 if(EMSCRIPTEN)
-  set(NOVOX_WASM_EXPORTS "_novox_create,_novox_destroy,_novox_set_sample_rate,_novox_load_dictionary,_novox_add_word,_novox_render,_novox_plan,_novox_import,_novox_phonemize,_novox_voice_names,_novox_stream_create,_novox_stream_destroy,_novox_stream_length,_novox_stream_position,_novox_stream_lead,_novox_stream_seek,_novox_stream_process,_novox_last_error,_novox_free,_malloc,_free")
+  set(NOVOX_WASM_EXPORTS "_novox_create,_novox_destroy,_novox_set_sample_rate,_novox_load_dictionary,_novox_add_word,_novox_render,_novox_plan,_novox_lyric_tokens,_novox_import,_novox_phonemize,_novox_transcribe,_novox_voice_names,_novox_stream_create,_novox_stream_destroy,_novox_stream_length,_novox_stream_position,_novox_stream_lead,_novox_stream_seek,_novox_stream_process,_novox_last_error,_novox_free,_malloc,_free")
   add_executable(novox_wasm $<TARGET_OBJECTS:novox_objects>)
   set_target_properties(novox_wasm PROPERTIES OUTPUT_NAME novox_wasm SUFFIX ".js")
   target_link_options(novox_wasm PRIVATE

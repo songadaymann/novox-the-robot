@@ -1,0 +1,54 @@
+Novox patch for whisper.cpp v1.8.3 (the assert is unchanged through v1.9.5 / master, 2026-10;
+upstream PR ggml-org/whisper.cpp#4096 proposes a similar fix). Applied by FetchContent in
+plugin/CMakeLists.txt through plugin/patches/git-apply-once.cmake.
+
+With DTW token timestamps on, each decoded window is aligned against its own audio tokens
+(n_frames/2, 20 ms each). A window that advanced under 160 ms (a segment ending at <|0.14|>,
+or a 110 ms sliver at the end of the file) has fewer audio tokens than the median filter is
+wide (7), and WHISPER_ASSERT(filter_width < a->ne[2]) aborted the process: inside a DAW that
+takes down the host. Reproduced on CSD en023b.wav (seek_delta 14) and en012a.wav (11 frames
+left). The filter now runs whenever reflect padding fits (half-width < length) and is skipped
+otherwise, like openai-whisper's timing.py. Windows under 2 audio tokens skip DTW entirely
+(their 1D alignment matrix would trip dtw_and_backtrace's ggml_n_dims assert); their tokens
+keep t_dtw = -1. Windows of 8+ audio tokens take exactly the old path.
+
+diff --git a/src/whisper.cpp b/src/whisper.cpp
+index 5b6e4b4..2d2d547 100644
+--- a/src/whisper.cpp
++++ b/src/whisper.cpp
+@@ -8769,7 +8769,20 @@ static void median_filter(struct ggml_tensor * dst , const struct ggml_tensor *
+         return;
+     }
+     int filter_width = ((median_filter_user_data *) userdata)->filter_width;
+-    WHISPER_ASSERT(filter_width < a->ne[2]);
++    // A window that advanced under 8 audio tokens (160 ms: a segment ending at <|0.14|>, or
++    // the last sliver of a file) used to abort the whole process here. Reflect padding only
++    // needs the half-width to fit, so filter whenever it does and otherwise pass the values
++    // through unfiltered, as openai-whisper's timing.py median_filter does.
++    if (filter_width/2 >= a->ne[2]) {
++        for (int64_t i = 0; i < a->ne[0]; ++i) {
++            for (int64_t j = 0; j < a->ne[1]; ++j) {
++                for (int64_t k = 0; k < a->ne[2]; ++k) {
++                    whisper_set_f32_nd(dst, i, j, k, 0, whisper_get_f32_nd(a, i, j, k, 0));
++                }
++            }
++        }
++        return;
++    }
+     WHISPER_ASSERT(filter_width % 2);
+     WHISPER_ASSERT(ggml_n_dims(a) == 3);
+     WHISPER_ASSERT(a->type == GGML_TYPE_F32);
+@@ -8815,6 +8828,13 @@ static void whisper_exp_compute_token_level_timestamps_dtw(
+     WHISPER_ASSERT(n_frames <= n_audio_ctx * 2);
+     WHISPER_ASSERT(ctx->params.dtw_aheads_preset != WHISPER_AHEADS_NONE);
+ 
++    // Under 2 audio tokens (a window that advanced under 40 ms) there is nothing to align, and
++    // the alignment matrix would collapse to one dimension, which dtw_and_backtrace asserts
++    // against. Leave t_dtw at -1 (callers fall back to t0/t1) instead of aborting.
++    if (n_frames/2 < 2) {
++        return;
++    }
++
+     // FIXME: Allocating mem everytime we call this func
+     // Our ggml buffer should be pre-allocated somewhere during init and reused
+     // when we call this function

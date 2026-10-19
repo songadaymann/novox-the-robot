@@ -25,6 +25,8 @@ bool isSonorant(const std::string& s) {
   return p && (p->cls == PhonClass::Nasal || p->cls == PhonClass::Liquid || p->cls == PhonClass::Glide);
 }
 
+}  // namespace
+
 // Consonant sequences English allows at the start of a syllable (beyond single
 // consonants, which are always allowed). Used for maximal-onset splitting.
 bool legalOnset(const Pronunciation& p, size_t from, size_t to) {
@@ -39,6 +41,8 @@ bool legalOnset(const Pronunciation& p, size_t from, size_t to) {
       "S P R", "S T R", "S K R", "S P L", "S K W", "S K Y", "S P Y"};
   return ok.count(key) > 0;
 }
+
+namespace {
 
 // Splits one word's phonemes across `n` note syllables. Empty groups mean the
 // word has fewer vowels than notes; those notes become melismas.
@@ -113,17 +117,32 @@ std::string pronString(const Pronunciation& p) {
   return out;
 }
 
-// Flows a lyric line onto notes without lyrics. Hyphenated words keep the
-// user's split; other words take one note per vowel in their pronunciation.
-std::vector<Note> flowLyrics(const std::vector<Note>& notes, const std::string& line, const Lexicon& lex,
-                             std::vector<std::string>& warnings) {
-  std::vector<Note> out = notes;
-  if (line.empty()) return out;
+// A word containing this mark is sung on one note ("wanna~" or "wan~na": two
+// syllables slurred together, like LilyPond's lyric tie). Without it a word
+// takes one note per vowel. The mark is dropped from the note's lyric; a lone
+// mark leaves its note without a lyric (a hum, or the end of the word before).
+constexpr char kOneNoteMark = '~';
+
+bool isHold(const std::string& t) { return t == "_" || t == "+"; }
+
+}  // namespace
+
+std::vector<std::string> lyricFlowTokens(const std::string& line, const Lexicon& lex) {
   std::vector<std::string> tokens;
   for (const auto& tok : tokenizeLyrics(line)) {
-    bool userSplit = tok.back() == '-' || isExplicit(tok) || tok == "_" || tok == "+";
-    // A token directly after a hyphenated one is the tail of that word.
-    bool tail = !tokens.empty() && !tokens.back().empty() && tokens.back().back() == '-';
+    if (!isExplicit(tok) && tok.find(kOneNoteMark) != std::string::npos) {
+      std::string one = tok;
+      one.erase(std::remove(one.begin(), one.end(), kOneNoteMark), one.end());
+      tokens.push_back(one);
+      continue;
+    }
+    bool userSplit = tok.back() == '-' || isExplicit(tok) || isHold(tok);
+    // A token after a hyphenated one is the tail of that word, also when held
+    // notes come between ("sun- _ set"): buildSyllables keeps the word open
+    // across holds, so splitting the tail again by its own vowels would give
+    // the word extra notes.
+    auto last = std::find_if(tokens.rbegin(), tokens.rend(), [](const std::string& t) { return !isHold(t); });
+    bool tail = last != tokens.rend() && !last->empty() && last->back() == '-';
     if (userSplit || tail) {
       tokens.push_back(tok);
       continue;
@@ -138,6 +157,18 @@ std::vector<Note> flowLyrics(const std::vector<Note>& notes, const std::string& 
     for (size_t k = 1; k + 1 < vowels; ++k) tokens.push_back("-");
     tokens.push_back("");
   }
+  return tokens;
+}
+
+namespace {
+
+// Flows a lyric line onto notes without lyrics. Manual note edits use the same
+// tokenization so an unhyphenated word takes exactly the same notes here and there.
+std::vector<Note> flowLyrics(const std::vector<Note>& notes, const std::string& line, const Lexicon& lex,
+                            std::vector<std::string>& warnings) {
+  std::vector<Note> out = notes;
+  if (line.empty()) return out;
+  const auto tokens = lyricFlowTokens(line, lex);
   size_t t = 0;
   for (auto& note : out) {
     if (!note.lyric.empty()) continue;
@@ -250,6 +281,10 @@ float sumDur(const Pronunciation& p, const Voice& v) {
   return s;
 }
 
+// Rests shorter than this are sung through (connected notes): the silence's
+// fade-out/fade-in transitions need about this long to stay click-free.
+constexpr double kShortestRest = 0.04;
+
 class Emitter {
  public:
   explicit Emitter(std::vector<Segment>& out) : out_(out) {}
@@ -257,7 +292,11 @@ class Emitter {
   void add(SegKind kind, const std::string& label, double start, double end, const Params& p,
            bool takeNext = false) {
     if (end - start < 1e-4) return;
-    // Fill any hole with silence.
+    // A hole too short to fade out and back in is held by the sound before it
+    // (e.g. a vowel running into a stop's closure); longer holes become silence.
+    if (!out_.empty() && start > out_.back().end + 1e-6 && start - out_.back().end < kShortestRest &&
+        out_.back().kind != SegKind::Silence)
+      out_.back().end = start;
     if (!out_.empty() && start > out_.back().end + 1e-6) {
       Segment sil;
       sil.kind = SegKind::Silence;
@@ -480,7 +519,12 @@ Plan planScore(const Score& score, const Lexicon& lex) {
   onsetStart[0] = syls[0].start - firstOnset;
   for (size_t i = 0; i < n; ++i) {
     Syl& a = syls[i];
-    if (i + 1 < n) a.end = std::min(a.end, syls[i + 1].start);  // no overlaps
+    if (i + 1 < n) {
+      a.end = std::min(a.end, syls[i + 1].start);  // no overlaps
+      // A gap too short to hear as a rest would only chop the voice off and on
+      // again in a few ms (a loud click): sing straight through it instead.
+      if (syls[i + 1].start - a.end < kShortestRest) a.end = syls[i + 1].start;
+    }
     double coda = sumDur(a.coda, v);
     double nextOnset = i + 1 < n ? sumDur(syls[i + 1].onset, v) : 0.0;
     double gap = i + 1 < n ? std::max(0.0, syls[i + 1].start - a.end) : 0.0;
@@ -550,7 +594,7 @@ Plan planScore(const Score& score, const Lexicon& lex) {
     pn.start = note.start + plan.lead;
     pn.end = note.start + note.dur + plan.lead;
     pn.midi = note.pitch;
-    pn.legato = prev && std::fabs(note.start - (prev->start + prev->dur)) < 0.01;
+    pn.legato = prev && std::fabs(note.start - (prev->start + prev->dur)) < kShortestRest;
     plan.notes.push_back(pn);
     prev = &note;
   }

@@ -249,8 +249,9 @@ Score importMidi(const std::vector<uint8_t>& data, const ImportOptions& opts, st
   size_t li = 0;
   for (const auto& mn : notes) {
     Note n;
-    n.start = seconds(mn.tick);
-    n.dur = seconds(mn.endTick) - n.start;
+    // Beat positions come straight from ticks, so a tempo map can't move notes.
+    n.start = opts.beats ? static_cast<double>(mn.tick) / division : seconds(mn.tick);
+    n.dur = (opts.beats ? static_cast<double>(mn.endTick) / division : seconds(mn.endTick)) - n.start;
     n.pitch = static_cast<float>(mn.pitch);
     // Attach the lyric event nearest this note's start.
     while (li < lyrics.size() && lyrics[li].first + tolerance < mn.tick) ++li;
@@ -480,7 +481,7 @@ Score importMusicXml(const std::string& xml, const ImportOptions& opts, std::vec
   bool lastHadExtend = false, inSlur = false, anyLyric = false;
   int otherVoices = 0;
 
-  auto noteSeconds = [&](double dur) { return dur / divisions * 60.0 / tempo; };
+  auto noteSeconds = [&](double dur) { return dur / divisions * (opts.beats ? 1.0 : 60.0 / tempo); };
 
   for (const auto& m : parts[partIndex]->children) {
     if (m->name != "measure") continue;
@@ -597,7 +598,7 @@ Score importAny(const std::vector<uint8_t>& data, const ImportOptions& opts, std
   throw std::runtime_error("unrecognized file: expected MIDI or MusicXML");
 }
 
-std::string scoreToJson(const Score& score) {
+std::string scoreToJson(const Score& score, bool beats) {
   static const char* names[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
   auto esc = [](const std::string& s) {
     std::string r;
@@ -612,7 +613,7 @@ std::string scoreToJson(const Score& score) {
     return r;
   };
   std::ostringstream o;
-  o << "{\n  \"units\": \"seconds\",\n";
+  o << "{\n  \"units\": \"" << (beats ? "beats" : "seconds") << "\",\n";
   char buf[64];
   std::snprintf(buf, sizeof buf, "%.3f", score.tempo);
   o << "  \"tempo\": " << buf << ",\n";
@@ -635,9 +636,10 @@ std::string scoreToJson(const Score& score) {
       std::snprintf(buf, sizeof buf, "%.3f", n.pitch);
       pitch = buf;
     }
-    std::snprintf(buf, sizeof buf, "%.4f", n.start);
+    const char* timeFormat = beats ? "%.6f" : "%.4f";
+    std::snprintf(buf, sizeof buf, timeFormat, n.start);
     std::string start = buf;
-    std::snprintf(buf, sizeof buf, "%.4f", n.dur);
+    std::snprintf(buf, sizeof buf, timeFormat, n.dur);
     o << "    {\"pitch\": " << pitch << ", \"start\": " << start << ", \"dur\": " << buf;
     if (!n.lyric.empty()) o << ", \"lyric\": \"" << esc(n.lyric) << "\"";
     o << "}" << (i + 1 < score.notes.size() ? "," : "") << "\n";

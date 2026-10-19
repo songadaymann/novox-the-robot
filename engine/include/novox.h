@@ -46,12 +46,57 @@ NOVOX_API char* novox_plan(novox_engine* engine, const char* score_json);
 
 /* Converts a MIDI file or (uncompressed) MusicXML file to a score JSON string
  * that novox_render / novox_stream_create accept. `options_json` may be NULL or e.g.
- * {"track": 1, "lyrics": "hel-lo world", "voice": "robot"}. Import warnings are
- * included in the result under "importWarnings". NULL on error. */
+ * {"track": 1, "lyrics": "hel-lo world", "voice": "robot"}. "units": "beats" keeps the
+ * file's own beat positions (ticks / divisions) instead of converting through its tempo
+ * map to seconds. Import warnings are included in the result under "importWarnings".
+ * NULL on error. */
 NOVOX_API char* novox_import(novox_engine* engine, const void* data, size_t size, const char* options_json);
+
+/* Transcribes a sung recording into a score: melody from pitch tracking, and,
+ * when `words_json` is given, lyrics lined up with the notes. `words_json` is
+ * the output of any speech recognizer with word timestamps, e.g. Whisper:
+ *   [{"word": "hello", "start": 0.52, "end": 0.91, "probability": 0.97}, ...]
+ * A word may also carry its sub-word tokens, each with the time the recognizer
+ * finished it (whisper's DTW token times), which singing-v2 uses as soft anchors:
+ *   "tokens": [{"text": " re", "time": 1.23, "probability": 0.9}, ...]
+ * `options_json` may be NULL or an object, e.g. {"algorithm": "singing-v2"}:
+ *   algorithm       "legacy" (default), "singing-v1" (native singing sequence
+ *                   decoder) or "singing-v2" (syllable-first: lyric syllables
+ *                   decide note starts, the octave is decided per note; word ends
+ *                   and token times are soft anchors, word starts are not used).
+ *   detail          singing-v2's note detail: "natural" (default: one note per
+ *                   sung syllable plus real melodic steps; scoops, approaches from
+ *                   up to a whole tone below, grace notes and droops at a
+ *                   syllable's end belong to their note) or "detailed" (those that
+ *                   hold a pitch are notes of their own, as annotators who mark
+ *                   every pitch they hear write them; vibrato and glides without
+ *                   a plateau stay one note). Validated but ignored by legacy and
+ *                   singing-v1.
+ *   roundPitches    snap note pitches to semitones (default true).
+ *   minNoteSeconds (0.08), splitSemitones (0.7), onsetDb (5), silenceDb (-45),
+ *   stabilizePitch (false; experimental settled-pitch and dropout checks for
+ *                   held natural vocals): legacy and singing-v1 tuning, validated
+ *                   but ignored by singing-v2.
+ *   debugFrames     (development, default false) adds the pitch-analysis frames as
+ *                   "frames": [[time, midi, db, clarity, confidence], ...]
+ *                   (midi 0 = unvoiced).
+ * Returns a seconds-based score JSON whose notes carry "confidence" (0..1) and
+ * "pitchSpread", with the algorithm (and for singing-v2 its "detail" and
+ * "tuningCents"), the words and the indices of words no note took under
+ * "transcription", and any warnings under "transcribeWarnings";
+ * NULL on error. */
+NOVOX_API char* novox_transcribe(novox_engine* engine, const float* samples, size_t count, double sample_rate,
+                                 const char* words_json, const char* options_json);
 
 /* Space-separated phonemes for a line of text, e.g. "HH AX L OW | W ER L D". */
 NOVOX_API char* novox_phonemize(novox_engine* engine, const char* text);
+
+// Expand lyric text to one token per note using the same rules as novox_plan.
+// dictionary_json is an optional {"word":"ARPABET"} object, local to this call.
+// Returns {"tokens":[...]}; empty tokens are word tails or lone "~" marks.
+// Free the result with novox_free. On invalid dictionary JSON returns NULL and
+// sets novox_last_error. This never changes the shared engine's dictionary.
+NOVOX_API char* novox_lyric_tokens(novox_engine* engine, const char* text, const char* dictionary_json);
 
 /* Comma-separated built-in voice preset names. */
 NOVOX_API char* novox_voice_names(void);

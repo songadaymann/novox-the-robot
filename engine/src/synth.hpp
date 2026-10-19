@@ -27,7 +27,9 @@ std::vector<float> renderPlan(const Plan& plan, const Voice& voice, const Render
 
 // Incremental renderer for real-time use (plugins): owns its plan, renders any
 // chunk size from any position, never allocates in process(). Output is at a
-// fixed gain (no normalization) with a soft clip above -2 dBFS.
+// fixed gain (no normalization) with a soft clip above -2 dBFS. Long silent
+// rests retain their duration but bypass synthesis once filter tails are
+// inaudible; source phase/noise resumes deterministically before the next onset.
 class Stream {
  public:
   Stream(Plan plan, Voice voice, double sampleRate, uint32_t seed = 1);

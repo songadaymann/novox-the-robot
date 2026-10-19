@@ -1,0 +1,5 @@
+#!/bin/sh
+# A new Audio Unit shows up in DAWs without logging out: macOS rebuilds its AU list when the
+# registrar restarts.
+killall -9 AudioComponentRegistrar >/dev/null 2>&1 || true
+exit 0

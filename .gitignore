@@ -7,3 +7,10 @@ reference/
 build-wasm/
 web/novox/
 build-plugin/
+build-release/
+
+# Secrets never belong in the repo (see .env.example for names, if any).
+.env
+.env.*
+!.env.example
+.dev.vars

@@ -57,6 +57,9 @@ class Singer:
         lib.novox_last_error.restype = ctypes.c_char_p
         lib.novox_last_error.argtypes = [ctypes.c_void_p]
         lib.novox_free.argtypes = [ctypes.c_void_p]
+        lib.novox_transcribe.restype = ctypes.c_void_p
+        lib.novox_transcribe.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_float), ctypes.c_size_t,
+                                         ctypes.c_double, ctypes.c_char_p, ctypes.c_char_p]
         lib.novox_import.restype = ctypes.c_void_p
         lib.novox_import.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_char_p]
         lib.novox_stream_create.restype = ctypes.c_void_p
@@ -127,6 +130,33 @@ class Singer:
         data = Path(path).read_bytes()
         opts = json.dumps({"lyrics": lyrics, "track": track, **({"voice": voice} if voice else {})})
         return json.loads(self._take_string(self._lib.novox_import(self._engine, data, len(data), opts.encode())))
+
+    def transcribe(self, samples, sample_rate: float, words=None, **options) -> dict:
+        """Sung audio (mono floats) -> score dict. `words`: [{"word", "start", "end", "probability"}]
+        from a speech recognizer with word timestamps (e.g. Whisper), to add lyrics; a word may
+        carry "tokens": [{"text", "time", "probability"}] (sub-word pieces and when the recognizer
+        finished each), which singing-v2 uses as soft anchors.
+        algorithm="singing-v1" selects candidate sequence decoding for singing; "singing-v2" is
+        syllable-first (lyric syllables decide note starts, octave decided per note). The API
+        default is "legacy" for compatibility. detail="natural" (default) gives singing-v2 one
+        note per sung syllable plus real melodic steps; detail="detailed" also makes notes of
+        held approaches, grace notes and droops (as annotators who mark every pitch write
+        them); vibrato and glides without a plateau stay one note in both. debugFrames=True
+        adds the analysis frames.
+        Returned transcription metadata retains original timestamped words and unresolved word
+        indices. See novox_transcribe in engine/include/novox.h for every option."""
+        try:
+            import numpy as np
+            if not isinstance(samples, np.ndarray):
+                raise ImportError
+            array = np.ascontiguousarray(samples, dtype=np.float32)  # kept alive for the call
+            data = array.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+        except ImportError:
+            data = (ctypes.c_float * len(samples))(*[float(x) for x in samples])
+        wj = json.dumps(words).encode() if words else None
+        oj = json.dumps(options).encode() if options else None
+        ptr = self._lib.novox_transcribe(self._engine, data, len(samples), float(sample_rate), wj, oj)
+        return json.loads(self._take_string(ptr))
 
     def stream(self, score) -> "Stream":
         """Incremental renderer (what a plugin uses): process(n) returns the next n samples."""

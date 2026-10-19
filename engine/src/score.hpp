@@ -40,7 +40,8 @@ struct Score {
   Voice voice;
   std::vector<std::pair<std::string, std::string>> dictionary;
   // Lyric line to flow onto notes that have no lyric. Unhyphenated words take
-  // as many notes as they have syllables ("canoe" -> two notes).
+  // as many notes as they have syllables ("canoe" -> two notes) unless marked
+  // with "~" ("wanna~" -> one note); a lone "~" leaves a note without a lyric.
   std::string lyrics;
 };
 

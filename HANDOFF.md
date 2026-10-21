@@ -1274,13 +1274,20 @@ and playback, and these fixes found while testing in MuseScore 4.7.5:
   compiler has it (root `CMakeLists.txt`); see docs/HOSTS.md.
 - **Render handoff:** the old render goes to `retired_` under `retiredMutex_` instead of a
   `callAsync` that could run after the processor was deleted.
-- **Offline bounces** (`isNonRealtime()`) wait in `processBlock` for the render of the current song,
-  tempo and sample rate (`waitForRender`, up to 2 minutes, or until a render fails).
-- **Edits mark the host project changed:** `stateEdits_` counts song, tempo and MMC edits (not
-  state loads), and the timer calls `updateHostDisplay(nonParameterStateChanged)` at most twice a
-  second (VST3 `setDirty`, AU ClassInfo). MuseScore reads a plugin's state again only then.
+- **Offline bounces** (`isNonRealtime()`: a DAW's offline bounce or freeze; MuseScore's export
+  runs in real time) wait in `processBlock` for the render of the current song and sample rate, and
+  of the tempo on the first block after the transport starts (`waitForRender`, up to 2 minutes, or
+  until this song's render fails: `failedRevision_`). A tempo that changes during the bounce is
+  followed as in real time, with renders in the background: waiting for it made a ritardando cost a
+  full render per block (an adversarial review measured 200 blocks taking 106 s).
+- **Edits mark the host project changed:** `stateEdits_` counts song, tempo and MMC edits and a
+  `.novox` file the editor opens (`openSongFile`), not a state the host loads (`loadState`,
+  `storeMmc`). The timer calls `updateHostDisplay` once edits pause for 1 s, or every 5 s while they
+  go on: `nonParameterStateChanged` (VST3 `setDirty`; MuseScore reads a plugin's state again only
+  then), plus `parameterInfoChanged` for an AU, since JUCE 8.0.15's AU wrapper ignores the first and
+  sends ClassInfo only with the second (Novox has no parameters).
 
-Checks on this Mac: ctest, 376 plugin checks, 33 editor checks, 11 UI test files and the Python
+Checks on this Mac: ctest, the plugin checks, 33 editor checks, the 10 UI test files and the Python
 tests pass. In MuseScore 4.7.5's own export the VST3 sings in time across a tempo change, and 30
 exports quit cleanly. Windows itself is checked only by `.github/workflows/plugin-windows.yml`.
 Signing (Windows and Mac) is still open.

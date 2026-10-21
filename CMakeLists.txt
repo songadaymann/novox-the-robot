@@ -30,6 +30,8 @@ if(APPLE)
   check_cxx_compiler_flag(-fc++-static-destructors=thread-local NOVOX_KEEP_STATICS)
   if(NOVOX_KEEP_STATICS)
     add_compile_options("$<$<COMPILE_LANGUAGE:CXX,OBJCXX>:-fc++-static-destructors=thread-local>")
+  else()
+    message(STATUS "This compiler can't keep C++ statics alive at exit: MuseScore may abort on quit with the VST3 loaded")
   endif()
 endif()
 

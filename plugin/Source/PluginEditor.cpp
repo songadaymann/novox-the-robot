@@ -214,7 +214,7 @@ juce::WebBrowserComponent::Options NovoxEditor::makeOptions() {
               if(open) {juce::MemoryBlock data;if(file.getSize()>NovoxProcessor::maxStateBytes || !file.loadFileAsData(data)) error="Could not read song";
                 else {juce::MemoryInputStream stream(data,false);auto parsed=juce::JSON::parse(stream.readString());
                   if(!parsed.isObject() || (parsed.hasProperty("novoxState") ? !parsed["song"].isObject() || !parsed["song"].hasProperty("notes") : !parsed.hasProperty("notes"))) error="Not a Novox song file";
-                  else {safe->proc_.setStateInformation(data.getData(),static_cast<int>(data.getSize()));safe->songFile_=file;}}
+                  else {safe->proc_.openSongFile(data.getData(),static_cast<int>(data.getSize()));safe->songFile_=file;}}
               } else {file=file.withFileExtension(extension);if(!file.replaceWithData(bytes.getData(),bytes.getSize())) error="Could not save file";else if(song) safe->songFile_=file;}
             }
             if(file==juce::File()) error="cancelled";

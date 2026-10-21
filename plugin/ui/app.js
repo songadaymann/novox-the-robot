@@ -1323,7 +1323,15 @@ document.addEventListener("keydown", (e) => {
   // Space plays and stops: our transport, or in a DAW its transport (over MMC once the DAW is known
   // to listen, else as the key press the native side hands it, unless that failed: spaceToPage).
   if (k === " " && !mod) {
-    if (inDaw() && spaceToPage && (!mmc.works || noMmc())) { if (!spaceToWebView(platformOf(S.status), e.target)) e.preventDefault(); return; }
+    if (inDaw() && spaceToPage && (!mmc.works || noMmc())) {
+      // Where the web view can't pass it on either (WebView2), a notation app followed by its clock
+      // says each time where playback starts, as the first press did.
+      if (!spaceToWebView(platformOf(S.status), e.target)) {
+        e.preventDefault();
+        if (followsSamples() && !e.repeat) followsHost("NOVOX FOLLOWS PLAYBACK", "start it in your notation app");
+      }
+      return;
+    }
     e.preventDefault(); if (!inDaw()) togglePlay(); else if (!e.repeat) hostPlayStop(); return;
   }
   if ((k === "Delete" || k === "Backspace") && S.sel.size) {

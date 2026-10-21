@@ -165,10 +165,12 @@ int chunkAt(const juce::MemoryBlock& data, const char* id, size_t from = 12) {
   return -1;
 }
 
-// An offline bounce or export (MuseScore's audio export, a DAW's offline bounce) plays the song it
-// has just been given, not silence or the old render. Edits tell the host they changed the project
-// (updateHostDisplay: a VST3's dirty flag, an AU's ClassInfo), at most twice a second, and loading
-// a state does not.
+// An offline bounce (isNonRealtime) plays the song it has just been given, not silence or the old
+// render, and a tempo that changes during it doesn't make every block wait for a new render. Edits
+// tell the host they changed the project (updateHostDisplay: a VST3's dirty flag; for an AU, a
+// parameter-info change, which JUCE's AU wrapper needs to pass on ClassInfo) once editing pauses,
+// or every few seconds while it goes on; the host loading a state is not an edit, the editor
+// opening a .novox file is.
 void testOfflineRenderAndEdits(const juce::String& songJson) {
   struct Listener : juce::AudioProcessorListener {
     int edits = 0;
@@ -184,7 +186,7 @@ void testOfflineRenderAndEdits(const juce::String& songJson) {
   p.prepareToPlay(48000, 512);
   waitForRender(p);
   p.addListener(&listener);
-  pump(0.6);
+  pump(1.3);
   CHECK(listener.edits == 0);  // a new instance has nothing to save
 
   ph.playing = true;
@@ -197,27 +199,74 @@ void testOfflineRenderAndEdits(const juce::String& songJson) {
   float diff = 0;
   for (size_t i = 0; i < std::min(offline.size(), live.size()); ++i) diff = std::max(diff, std::fabs(offline[i] - live[i]));
   CHECK(rms(live) > .001f && offline.size() == live.size() && diff < 1e-5f);
-  ph.playing = false;
 
-  pump(0.6);
-  CHECK(listener.edits == 1);
+  // A ritardando during an offline bounce: the tempo changes every block. It is followed as in real
+  // time (renders in the background), not with a full render per block.
+  {
+    ph.playing = false;
+    play(p, ph, 0, .02);
+    const int before = p.getStatus().rendersStarted;
+    const double t0 = juce::Time::getMillisecondCounterHiRes();
+    p.setNonRealtime(true);
+    ph.playing = true;
+    juce::AudioBuffer<float> buf(2, 512);
+    juce::MidiBuffer midi;
+    double beats = 0;
+    for (int block = 0; block < 200; ++block) {
+      ph.bpm = 120 - 0.02 * block;
+      ph.ppq = beats;
+      p.processBlock(buf, midi);
+      beats += 512.0 / 48000 * ph.bpm / 60;
+    }
+    p.setNonRealtime(false);
+    ph.playing = false;
+    ph.bpm = 120;
+    const double seconds = (juce::Time::getMillisecondCounterHiRes() - t0) / 1000;
+    CHECK(seconds < 10 && p.getStatus().rendersStarted - before < 40);
+    waitForRender(p);
+  }
+
+  pump(1.3);
+  CHECK(listener.edits == 1);  // the song set before the bounce
   juce::MemoryBlock state;
   p.getStateInformation(state);
   p.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
   p.setSongJson(p.getSongJson());  // the page sending back the song it was given
-  pump(0.6);
+  {  // a project saved with MMC working (a host load: the MMC state is not an edit either)
+    NovoxProcessor learned;
+    learned.setMmcState({true, 0.30000000000000004, 25});
+    juce::MemoryBlock withMmc;
+    learned.getStateInformation(withMmc);
+    p.setStateInformation(withMmc.getData(), static_cast<int>(withMmc.getSize()));
+    CHECK(p.mmcState().works && std::fabs(p.mmcState().offset - 0.3) < 1e-9);
+  }
+  pump(1.3);
   CHECK(listener.edits == 1);
+
+  // Typing: edits a few tenths of a second apart are told once, after they pause.
   p.setPreviewTempo(97);
-  pump(0.1);
-  CHECK(listener.edits == 2);
-  p.setPreviewTempo(98);  // within half a second of the last notice: it waits for the next
-  pump(0.1);
-  CHECK(listener.edits == 2);
-  pump(0.6);
-  CHECK(listener.edits == 3);
+  pump(0.3);
   p.setPreviewTempo(98);
-  pump(0.6);
+  pump(0.3);
+  CHECK(listener.edits == 1);
+  pump(1.0);
+  CHECK(listener.edits == 2);
+  p.setPreviewTempo(98);  // no change
+  pump(1.3);
+  CHECK(listener.edits == 2);
+  // Edits that go on without a pause are told every few seconds.
+  for (int i = 0; i < 20; ++i) {
+    p.setPreviewTempo(100 + i);
+    pump(0.3);
+  }
   CHECK(listener.edits == 3);
+  pump(1.3);
+  CHECK(listener.edits == 4);
+
+  // The editor opening a .novox file replaces the song: an edit.
+  p.openSongFile(state.getData(), static_cast<int>(state.getSize()));
+  pump(1.3);
+  CHECK(listener.edits == 5);
   p.removeListener(&listener);
 }
 

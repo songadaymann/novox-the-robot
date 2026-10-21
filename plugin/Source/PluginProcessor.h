@@ -62,6 +62,8 @@ class NovoxProcessor : public juce::AudioProcessor, private juce::Timer {
   void changeProgramName(int, const juce::String&) override {}
   void getStateInformation(juce::MemoryBlock& destData) override;
   void setStateInformation(const void* data, int sizeInBytes) override;
+  // A .novox file the editor opens: like a state the host loads, but an edit the host is told of.
+  void openSongFile(const void* data, int sizeInBytes);
   // The state as JSON; `withProject` adds what belongs to the DAW project rather than the song (the
   // MMC state), left out of a .novox file.
   void writeState(juce::MemoryBlock& destData, bool withProject);
@@ -177,9 +179,12 @@ class NovoxProcessor : public juce::AudioProcessor, private juce::Timer {
   void timerCallback() override;
   void requestRender();
   void renderWorker();
-  // Offline (isNonRealtime) only: blocks until the render matches the song, sample rate and tempo,
-  // a render fails, or kOfflineRenderWaitMs passes.
-  void waitForRender(double sampleRate, double bpm);
+  // Offline (isNonRealtime) only: blocks until the render is of the current song at this sample
+  // rate and, when tempoToo (the first block after the transport starts), at the tempo the worker
+  // renders; or until this song's render fails, or kOfflineRenderWaitMs passes.
+  void waitForRender(double sampleRate, bool tempoToo);
+  bool loadState(const void* data, int sizeInBytes);  // false: not a Novox state
+  void storeMmc(const MmcState& s);                   // no edit (a loaded state)
   static constexpr double kOfflineRenderWaitMs = 120000;
 
   // song: a copy of the song's render (Compare > Robot), stale once the song changes.
@@ -198,9 +203,11 @@ class NovoxProcessor : public juce::AudioProcessor, private juce::Timer {
   std::atomic<int> audioRevision_{0};
   // Edits to what the project saves (song, tempo, MMC), not loads; the timer tells the host.
   std::atomic<int> stateEdits_{0};
-  int stateEditsNotified_ = 0;  // message thread
-  double stateNotifiedAt_ = 0;
-  static constexpr double kStateNotifyMs = 500;
+  // Message thread: edits told to the host, the last count seen, when it last changed and when the
+  // first edit not yet told was seen (-1: none).
+  int stateEditsNotified_ = 0, stateEditsSeen_ = 0;
+  double lastEditAt_ = 0, firstEditAt_ = -1;
+  static constexpr double kStateQuietMs = 1000, kStateMaxDelayMs = 5000;
 
   // Rendered audio handed to the audio thread.
   juce::SpinLock renderedLock_;
@@ -216,6 +223,7 @@ class NovoxProcessor : public juce::AudioProcessor, private juce::Timer {
   std::atomic<bool> rendering_{false};
   std::mutex errorMutex_;
   juce::String renderError_;
+  int failedRevision_ = -1;  // the audioRevision renderError_ is for (-1: the last render worked)
 
   // Transport as seen by the audio thread.
   std::atomic<double> sampleRate_{48000};

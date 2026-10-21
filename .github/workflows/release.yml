@@ -1,7 +1,7 @@
 # Builds release artifacts when a version tag (v*) is pushed:
 #   - novox CLI binaries (macOS universal, Linux x86_64, Windows x86_64) attached to the GitHub release
 #   - Python wheels + sdist, published to PyPI (configure PyPI trusted publishing for this repo)
-#   - npm package with the WebAssembly engine (needs an NPM_TOKEN repository secret)
+#   - npm package with the WebAssembly engine (needs an NPM_TOKEN repository secret; see docs/RELEASING.md)
 name: Release
 on:
   push:
@@ -14,7 +14,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - { os: macos-latest, name: macos-universal, flags: "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0", exe: novox }
+          - { os: macos-latest, name: macos-universal, flags: '-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0', exe: novox }
           - { os: ubuntu-latest, name: linux-x86_64, flags: "", exe: novox }
           - { os: windows-latest, name: windows-x86_64, flags: "", exe: Release/novox.exe }
     runs-on: ${{ matrix.os }}
@@ -67,9 +67,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: mymindstorm/setup-emsdk@v14
       - uses: actions/setup-node@v4
         with: { node-version: "22", registry-url: "https://registry.npmjs.org" }
+      - name: Check npm publishing credentials
+        shell: bash
+        env: { NODE_AUTH_TOKEN: "${{ secrets.NPM_TOKEN }}" }
+        run: |
+          if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
+            echo "::error::NPM_TOKEN is missing. Configure the repository's Actions secret before publishing; see docs/RELEASING.md."
+            exit 1
+          fi
+          if ! npm whoami --registry https://registry.npmjs.org >/dev/null 2>&1; then
+            echo "::error::npm authentication failed. Check NPM_TOKEN validity and registry connectivity; see docs/RELEASING.md."
+            exit 1
+          fi
+      - uses: mymindstorm/setup-emsdk@v14
       - run: ./scripts/build-wasm.sh
       - run: npm publish --access public
         working-directory: bindings/js

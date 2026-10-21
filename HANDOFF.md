@@ -1222,3 +1222,45 @@ They are not in this handoff.
 **Checks.** 275 plugin checks, 52709 engine checks, the UI node tests except NoteLyricsTests, the AU
 smoke test and oss-check pass (0 blockers, warning: no remote). The commit set is 107 files, none
 over 2 MB, with no /Users paths and no secret patterns.
+
+## Local CI/release repair (2026-10-19, 18:06 UTC)
+
+Local changes only, based on clean `main` / `4669b2d`. The remote main still had
+that commit; no other active task in this checkout or pre-existing edits were
+found. No commit, push, PR, workflow trigger, package publication, release edit,
+credential change, plugin installation, or installer rebuild was performed.
+
+- `engine/src/singing_pitch.cpp`: make `refinePeriod`'s `halfTaps` a static
+  constexpr so MSVC does not treat the lambda's array extent as a captured local.
+  The value, tap count and pitch algorithm are unchanged.
+- `.github/workflows/release.yml`: quote `arm64;x86_64` inside the matrix flags
+  passed to the shell. Add an early npm credential/identity check with explicit
+  missing-token and authentication-failure messages before the WebAssembly build.
+- `tests/release_workflow_tests.py`: five offline checks execute workflow scripts
+  with mocked cmake/npm; includes token handling/output suppression and ordering.
+  The Mac regression check fails on the original workflow with exit 127 and
+  `x86_64: command not found`, and passes on the fixed workflow.
+- `docs/RELEASING.md`: local verification commands, exact npm setup step and
+  publication caveats. The release log showed an empty NODE_AUTH_TOKEN; no real
+  credentials were read or tested. Jonathan must provide the repository Actions
+  secret `NPM_TOKEN` using an npm token permitted to publish `novox`.
+
+**Verified locally:** fresh Release engine/CLI/shared-library build; CTest passes,
+52,709 checks / 0 failures. Universal CLI built from the workflow's parsed command
+with only the build directory and local Python path adjusted; lipo reports
+x86_64 + arm64, both slices target macOS 11.0 and both render the 536,921-frame
+demo. Python ctypes rendering against the fresh dylib passes. Fresh Emscripten
+build and offline npm pack pass (8 files); the unpacked archive loads 16 voices,
+renders 135,600 finite samples and creates a 271,244-byte WAV under Node 22.
+Builds, package and evidence are isolated under `out/ci-repair/`; see its REPORT.md.
+
+**Still unverified:** MSVC/Windows compilation and wheel jobs, current remote CI,
+registry ownership/write permission, npm/PyPI publication. No Windows toolchain
+is available here. The Mac Python shared library was tested, not a new wheel.
+The published beta and local installer/checksum were left untouched (pkg SHA256
+`1ad28d5ae78cec6938877cb41afad7f6fd2e9ef895054780f2ac7ed9ba0583f1`).
+Signing/notarization and clean-user installation remain separate tasks.
+
+**Next approval:** committing/pushing these changes and remote validation need
+authorization; publishing needs separate approval. Rerunning the original beta
+release workflow would use its old tagged source, not this local repair.

@@ -797,7 +797,8 @@ double refinePeriod(const std::vector<float>& signal, long long center, double s
   const double ratio = std::exp2(radius / 12);
   const double lo = seed / ratio, hi = seed * ratio;
   const int count = std::clamp(static_cast<int>(std::lround(6 * seed)), 192, 512);
-  constexpr int halfTaps = 6;
+  // Static storage keeps this a constant expression inside the lambdas on MSVC.
+  static constexpr int halfTaps = 6;
   const long long margin = count / 2 + static_cast<long long>(std::ceil(hi / 2)) + halfTaps + 1;
   if (center < margin || center + margin >= static_cast<long long>(signal.size())) return seed;
   double mean = 0;

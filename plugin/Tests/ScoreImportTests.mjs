@@ -249,7 +249,8 @@ lib.novox_free.argtypes = [ctypes.c_void_p]; lib.novox_destroy.argtypes = [ctype
 data = sys.stdin.buffer.read()
 e = lib.novox_create(48000)
 p = lib.novox_import(e, data, len(data), sys.argv[2].encode())
-print(ctypes.string_at(p).decode() if p else json.dumps({"error": lib.novox_last_error(e).decode()}))
+# Raw UTF-8: a console code page (Windows) cannot print every character a score has (\u266d).
+sys.stdout.buffer.write(ctypes.string_at(p) if p else json.dumps({"error": lib.novox_last_error(e).decode()}).encode())
 if p: lib.novox_free(p)
 lib.novox_destroy(e)
 `, library, JSON.stringify(options)], { input: bytes, encoding: 'utf8' }));

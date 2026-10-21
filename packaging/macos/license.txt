@@ -1,12 +1,12 @@
 Novox The Robot
 Copyright (c) 2026 Jonathan Mann
 
-Novox The Robot (the app and the Audio Unit and VST3 plugins) is free software: you can
-redistribute it and/or modify it under the terms of the GNU Affero General Public License,
-version 3 (AGPLv3), as published by the Free Software Foundation, because it is built on
-JUCE under JUCE's open-source license. It comes WITH NO WARRANTY; without even the implied
-warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. The full text follows the
-notices below (also at https://www.gnu.org/licenses/agpl-3.0.html).
+Novox The Robot (the app and its plugins: Audio Unit and VST3 on macOS, VST3 on Windows) is
+free software: you can redistribute it and/or modify it under the terms of the GNU Affero
+General Public License, version 3 (AGPLv3), as published by the Free Software Foundation,
+because it is built on JUCE under JUCE's open-source license. It comes WITH NO WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. The
+full text follows the notices below (also at https://www.gnu.org/licenses/agpl-3.0.html).
 
 Source code: https://github.com/songadaymann/novox-the-robot
 
@@ -16,6 +16,9 @@ It includes:
 - whisper.cpp and ggml, copyright (c) 2023-2024 The ggml authors, MIT License.
 - The CMU Pronouncing Dictionary, copyright (c) 1993-2015 Carnegie Mellon University,
   BSD-style license.
+- Windows only: the WebView2 loader from Microsoft's WebView2 SDK (the Microsoft.Web.WebView2
+  package), copyright (c) Microsoft Corporation, BSD-style license. The Windows installer shows
+  its license and notices after the CMU Pronouncing Dictionary license below.
 
 The lyrics model it downloads on first use (Whisper large-v3-turbo, by OpenAI, converted
 for whisper.cpp) is MIT licensed and is not part of this installer.

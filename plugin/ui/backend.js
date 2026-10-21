@@ -17,7 +17,9 @@
 //   lyricTokens(text, dictionaryJSON) -> string JSON {tokens:[strings]} (throw on failure)
 //   playSourceReview([{id, from, to, at}], loop) -> "" or error: stored recordings (seconds
 //     [from, to) of each, `at` seconds into the phrase; overlapping pieces are mixed)
-//   onStatus(cb)  (sync; cb gets {beats,bpm,playing,host,capture,rendering,error,songVersion})
+//   onStatus(cb)  (sync; cb gets {beats,bpm,playing,host,capture,rendering,error,songVersion,
+//     platform: "mac" | "windows" | "linux", importTypes: {audio: [extensions], score: [extensions]}})
+//   hostSpace() -> bool: Space handed to the DAW's window as a key press
 //   isMock (bool)   starterSong (mock only: the song it starts with, see song-merge.js)
 
 const NATIVE = ["getSong", "setSong", "getPlan", "getVoices", "setCapture", "setTransport", "setTempo", "importFile", "audioImportStatus", "startAudioImport", "cancelAudioImport", "previewAudioImport", "playAudioReview", "stopAudioReview", "setEditorSize", "previewNote", "startMicrophone", "stopMicrophone", "cancelMicrophone", "readNativeDrop", "playSongReview", "playSourceReview", "storeSource", "getSource", "fileAction", "hostSpace", "setPlayhead", "hostTransport", "hostLocate", "setMmcState", "writeClipboard", "readClipboard", "lyricTokens", "planSong"];
@@ -279,6 +281,13 @@ function createMock() {
   // mmcRate: the frame rate it reads a locate's frames at; mmcLatency: ms before it acts. ?host=1
   // alone: a DAW that ignores MMC. It calls the plugin on every tick (status.blocks), or with
   // ?frozen=1 only while playing (Logic, for a track it is not playing).
+  // ?platform=windows (or linux): the plugin on that platform: Ctrl key names, no m4a import and no
+  // MMC port (as ?port=0 on a Mac). ?space=1: a DAW that plays and stops on the Space the editor
+  // hands it (hostSpace); without it the hand-over fails, as where the editor has no DAW window.
+  const platform = ["windows", "linux"].includes(params.get("platform")) ? params.get("platform") : "mac";
+  const mmcPort = platform === "mac" && params.get("port") !== "0", spaceWorks = params.get("space") === "1";
+  const importTypes = { audio: ["wav", "mp3", "aif", "aiff", ...(platform === "mac" ? ["m4a"] : []), "flac", "ogg"],
+    score: ["mid", "midi", "xml", "musicxml", "mxl"] };
   const mmcListens = params.get("mmc") === "1", mmcBias = +params.get("mmcBias") || 0;
   const mmcRate = +params.get("mmcRate") || 0, mmcLatency = +params.get("mmcLatency") || 0, frozen = params.get("frozen") === "1";
   const staleAudio = params.get("stale") === "1";
@@ -322,7 +331,8 @@ function createMock() {
     // ?stale=1: the audio stays at the first render (a render that never finishes).
     const status = { beats, bpm, playing, host, capture, rendering, error: "", songVersion: version, version: "1.0 beta",
       renderedVersion: staleAudio ? 1 : version, renders: { started: version, cancelled: staleAudio ? version - 1 : 0, secondsSinceDone: 0.5 },
-      ...(host ? { daw: true, seconds: beats * 60 / bpm, blocks, hostName: "Mock DAW", mmc: { port: true, ...mmcState } } : {}) };
+      platform, importTypes,
+      ...(host ? { daw: true, seconds: beats * 60 / bpm, blocks, hostName: "Mock DAW", mmc: { port: mmcPort, ...mmcState } } : {}) };
     for (const cb of listeners) cb(status);
   }, 33);
 
@@ -410,15 +420,15 @@ function createMock() {
     onAudioFileDrop: () => {},
     // Recorders so the file buttons and window sizes can be checked in a browser.
     fileAction: (action) => { record("fileAction", action); return delay(""); },
-    hostSpace: () => { record("hostSpace"); return delay(false); },
-    hostTransport: (action) => { record("hostTransport", action); if (host && mmcListens) later(() => { playing = action === "play"; }); return delay(host); },
+    hostSpace: () => { record("hostSpace"); if (host && spaceWorks) later(() => { playing = !playing; }); return delay(host && spaceWorks); },
+    hostTransport: (action) => { record("hostTransport", action); if (host && mmcPort && mmcListens) later(() => { playing = action === "play"; }); return delay(host && mmcPort); },
     hostLocate: (seconds, fps) => {
       record("hostLocate", seconds);
       // The label Novox sends (bar 1 at 01:00:00:00, as in Logic), read back at the DAW's own rate.
       const rate = +fps || 30, base = Math.round(rate), count = Math.round((3600 + seconds) * rate);
       const frame = count % base, landed = Math.floor(count / base) + frame / (mmcRate || rate) - 3600 + mmcBias;
-      if (host && mmcListens) later(() => { beats = Math.max(0, landed) * bpm / 60; });
-      return delay({ sent: host, frame, fps: rate });
+      if (host && mmcPort && mmcListens) later(() => { beats = Math.max(0, landed) * bpm / 60; });
+      return delay({ sent: host && mmcPort, frame, fps: rate });
     },
     setMmcState: (works, offset, rate) => { record("setMmcState", { works, offset, rate }); mmcState = { works: !!works, offset: +offset || 0, rate: +rate || 0 }; return delay(undefined); },
     setEditorSize: (width, height) => { record("setEditorSize", [width, height]); return delay(undefined); },

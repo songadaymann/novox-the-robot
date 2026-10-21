@@ -252,10 +252,13 @@ check("ambiguous old evidence is cleared only when its record may overlap", () =
 // The real planner is an optional extra: pinning a cut syllable must actually sing the same
 // phonemes, including an automatically split word and an isolated held vowel.
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const ni = process.argv.indexOf("--novox"), novox = resolve(root, ni < 0 ? "build/novox" : process.argv[ni + 1]);
+const ni = process.argv.indexOf("--novox");
+const novox = resolve(root, ni >= 0 ? process.argv[ni + 1] : process.platform === "win32" ? "build/Release/novox.exe" : "build/novox");
+// Asked for (--novox, as CI does), the engine must be there: no quiet skip.
+assert.ok(ni < 0 || existsSync(novox), `no engine CLI at ${novox}`);
 if (existsSync(novox)) {
   const plan = (s) => {
-    const p = spawnSync(novox, ["plan", "/dev/stdin"], { input: json({ tempo: 60, units: "beats", voice: "std",
+    const p = spawnSync(novox, ["plan", "-"], { input: json({ tempo: 60, units: "beats", voice: "std",
       notes: s.notes, ...(s.useNoteLyrics ? {} : { lyrics: s.lyrics }), dictionary: s.dictionary }), encoding: "utf8" });
     assert.equal(p.status, 0, p.stderr);
     return JSON.parse(p.stdout);

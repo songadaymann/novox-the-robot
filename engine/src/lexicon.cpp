@@ -3,6 +3,9 @@
 #include <cctype>
 #include <fstream>
 #include <sstream>
+#ifdef _WIN32
+#include <filesystem>
+#endif
 
 #include "phonemes.hpp"
 
@@ -47,7 +50,18 @@ bool Lexicon::parseArpabet(const std::string& text, Pronunciation& out) {
 }
 
 int Lexicon::loadCmudict(const std::string& path) {
-  std::ifstream in(path);
+  std::ifstream in;
+#ifdef _WIN32
+  // Windows reads a narrow path in the ANSI code page, but the bindings pass UTF-8 (Python's
+  // str.encode()): open it as UTF-8 first, then as given (the CLI's ANSI argv).
+  try {
+    in.open(std::filesystem::u8path(path));
+  } catch (const std::exception&) {
+  }
+  if (!in.is_open()) in.open(path);
+#else
+  in.open(path);
+#endif
   if (!in) return -1;
   std::stringstream ss;
   ss << in.rdbuf();

@@ -27,13 +27,18 @@ const PARALLEL = 8;
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => { const i = args.indexOf(name); if (i < 0) return fallback; const v = args[i + 1]; args.splice(i, 2); return v; };
-const novox = resolve(ROOT, option('--novox', 'build/novox'));
+const novoxGiven = args.includes('--novox');
+const novox = resolve(ROOT, option('--novox', process.platform === 'win32' ? 'build/Release/novox.exe' : 'build/novox'));
 const bpm = +option('--bpm', '120');
 const show = +option('--show', '0');
 const extra = option('--score', null);
 const tags = args.length ? args : ['s4-held-natural', 's4-held-detailed'];
 
-if (!existsSync(novox)) { console.log(`Lyric round trip: skipped (no engine CLI at ${novox})`); process.exit(0); }
+// Without the CLI the check is skipped, unless --novox asked for it (CI): then it fails.
+if (!existsSync(novox)) {
+  if (novoxGiven) { console.error(`Lyric round trip: no engine CLI at ${novox}`); process.exit(1); }
+  console.log(`Lyric round trip: skipped (no engine CLI at ${novox})`); process.exit(0);
+}
 const corpusCases = [];
 for (const corpus of CORPORA) {
   const dir = join(ROOT, corpus);
@@ -46,7 +51,7 @@ for (const corpus of CORPORA) {
 
 function plan(score) {
   return new Promise((done, fail) => {
-    const p = spawn(novox, ['plan', '/dev/stdin']);
+    const p = spawn(novox, ['plan', '-']);  // - : standard input
     let out = '', err = '';
     p.stdout.on('data', d => out += d);
     p.stderr.on('data', d => err += d);

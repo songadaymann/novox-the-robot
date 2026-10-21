@@ -1,0 +1,10 @@
+# Text files are stored with LF. Git for Windows checks them out with CRLF by default
+# (core.autocrlf=true), which is fine for source code but not for the files below.
+* text=auto
+
+# Patches are applied with git apply (plugin/patches/git-apply-once.cmake): keep their bytes exactly.
+*.patch -text
+
+# Shell scripts stop at the first CR under bash ("$'\r': command not found").
+*.sh text eol=lf
+packaging/macos/scripts-au/postinstall text eol=lf

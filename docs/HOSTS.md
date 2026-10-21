@@ -1,4 +1,4 @@
-# Hosts: Pro Tools, Ableton Live, Logic
+# Hosts: Pro Tools, Ableton Live, Logic, Windows
 
 How the plugin gets into each DAW, and what still needs testing there. Last checked 2026-10-17.
 
@@ -7,6 +7,7 @@ How the plugin gets into each DAW, and what still needs testing there. Last chec
 | Logic Pro | AU (two identities: Novox The Robot `Nvox`, and New Virtual Singer `Nvsg` for older projects) | In daily use; latest region-drag change not yet retested live |
 | Ableton Live | AU or VST3 | Not tested yet; checklist below |
 | Pro Tools | AAX (optional build) | Not released: builds, never loaded in Pro Tools, unsigned |
+| Windows DAWs | VST3 (64-bit) | Built by CI; not yet tested in a Windows DAW. See [Windows](#windows) |
 
 Releases (`scripts/package-mac.sh`, songaday.studio/plugins) ship the app, the AU (`Nvox` only) and
 the VST3. Pro Tools is left out: an AAX that loads in retail Pro Tools needs Avid's developer
@@ -206,4 +207,50 @@ the AU and once with the VST3, each on its own **MIDI track**, and note any diff
     - **It didn't move:** the display says to turn the setting on. It can tell only while Logic is
       calling the plugin; Logic stops calling one on a track it isn't playing.
   - **Until MMC is known to work,** Space reaches Logic as a key press.
-  - **Other hosts:** Live does not follow MMC, and GarageBand has no MMC input.
+  - **Other hosts:** Live does not follow MMC, and GarageBand has no MMC input. On Windows the
+    plugin has no MIDI port to send MMC from (see [Windows](#windows)).
+
+## Windows
+
+The VST3 and the standalone app build for 64-bit Windows (`.github/workflows/plugin-windows.yml`,
+installer in `packaging/windows/`). The editor, the song, playback, MIDI capture, import, export
+and singing capture are the same code as on a Mac. What differs:
+
+- **Editor.** It runs in Microsoft's WebView2, which Windows 11 includes and the installer adds
+  where it's missing. Without it the editor shows a link to the WebView2 Runtime download instead
+  of the page; the song still plays. Shortcuts use Ctrl where a Mac uses ⌘ (Alt-drag copies
+  notes). The web view's own reload, print, find and zoom keys are turned off, and so is its
+  right-click menu outside text fields.
+- **Space** goes to the DAW as a key press: the editor posts it to the DAW window that holds the
+  plugin window, as JUCE does with keys a plugin doesn't use (`plugin/Source/WinShortcuts.cpp`).
+  If that isn't possible, the display says once to click the DAW to use Space. Whether each DAW
+  acts on the posted key is untested.
+- **Mac only:**
+  - *Transport over MMC* (Logic): on Windows the plugin has no MIDI port of its own (JUCE can
+    only create one through Windows MIDI Services, which this build doesn't use), so a ruler click
+    can't move the DAW's playhead. The display says once to move the playhead in the DAW; Novox
+    follows it.
+  - *Logic region drags* (the AIFF with its timestamp markers): Logic is Mac only. A file dragged
+    from Explorer or from a DAW that hands over a file imports as usual, placed by its Broadcast
+    WAV time stamp if it has one; a drag that hands over no file says so.
+  - *m4a import* (AAC or ALAC): decoding it needs macOS's Core Audio. Windows imports WAV, MP3,
+    AIFF, FLAC and Ogg, and the file picker offers only those. Convert m4a files first.
+- **Lyrics recognition** runs on the CPU (the Mac uses the GPU through Metal), so it's slower.
+  It needs a processor with AVX2, FMA, F16C and BMI2 (most PCs from 2015 on); without them an
+  import says so before downloading the model, and Melody only still works. That path is untested
+  on such a CPU: test that the app and the VST3 load there at all (with Intel's SDE emulator, or a
+  pre-2013 PC), since code built for AVX2 that the linker shares with the rest of the plugin
+  could run first. It uses one thread per physical core but one, up to 8.
+- **Files** live in `%LOCALAPPDATA%\Novox` (the Mac's `~/Library/Application Support/Novox`): the
+  lyrics model, the web view's data (`WebView2`, which keeps the import options) and the files
+  dragged out of the editor (`Exports`).
+- **Microphone.** Allow it in **Settings > Privacy & security > Microphone**, including "Let
+  desktop apps access your microphone". Windows may let the plugin open a blocked microphone and
+  record silence, so after 3 silent seconds the editor points to that setting. Singing
+  capture opens the default input device in shared mode, which can fail while a DAW holds the
+  same interface exclusively (ASIO, or WASAPI exclusive mode).
+
+To test in a Windows DAW, run the Ableton Live checklist above with the VST3, plus: Space
+while the editor has focus, typing lyrics and Ctrl+Z/C/V (some DAWs take keys before plugins do),
+dragging WAV and MIDI out of the editor into a track, and two DAWs open with the editor showing at
+the same time.

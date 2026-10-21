@@ -105,6 +105,32 @@ backed up before replacement. Archives have unique UTC dates and are never prune
 by the build. Python 3.9+ and Git are required. See [plugin backups and recovery](docs/PLUGIN-BACKUPS.md)
 for archive contents, a custom backup location, and restoring a saved version.
 
+**Windows** (64-bit) builds the VST3 and the standalone app with Visual Studio 2022 or newer (the
+"Desktop development with C++" workload), Git and Python 3. Visual Studio ignores
+`CMAKE_BUILD_TYPE`, so always build with `--config Release`; a Debug build makes lyrics recognition
+very slow.
+
+```powershell
+cmake -S . -B build-plugin -A x64 -DNOVOX_BUILD_PLUGIN=ON   # downloads JUCE, whisper.cpp and the WebView2 SDK
+cmake --build build-plugin --config Release --parallel --target NovoxTheRobot_VST3 NovoxTheRobot_Standalone NovoxPluginTests
+.\build-plugin\plugin\NovoxPluginTests_artefacts\Release\NovoxPluginTests.exe
+```
+
+- The VST3 is `build-plugin\plugin\NovoxTheRobot_artefacts\Release\VST3\Novox The Robot.vst3` and the
+  app is `...\Release\Standalone\Novox The Robot.exe`.
+- `NovoxPluginTests.exe --webview-smoke` opens the editor in WebView2 for a few seconds and checks
+  that its page loads and talks to the plugin.
+- Nothing is installed. Copy the `.vst3` folder into `C:\Program Files\Common Files\VST3`, or
+  configure with `-DNOVOX_INSTALL_AFTER_BUILD=ON` from an administrator prompt and the build copies
+  it there.
+- The engine alone builds the same way: `cmake -S . -B build -A x64`, then
+  `cmake --build build --config Release`. The CLI is `build\Release\novox.exe`; run the tests with
+  `ctest --test-dir build -C Release`.
+- `-DJUCE_WEBVIEW2_PACKAGE_LOCATION=<folder>` uses a copy of Microsoft's WebView2 SDK (the
+  `Microsoft.Web.WebView2` NuGet package) you already have instead of downloading it. Windows builds
+  link its WebView2 loader, which has a BSD-style license.
+- The installer is described in [`packaging/windows/README.md`](packaging/windows/README.md).
+
 How it works in a DAW: add it as an instrument. The plugin keeps its own song (notes in beats,
 lyrics, voice) and saves it with the project. It renders the whole song in the background whenever
 you edit it or the tempo changes, and plays the right part for wherever the playhead is, so looping
@@ -139,7 +165,8 @@ region supplies no usable file, the editor asks you to export it and drop the ex
 
 Drop a WAV or MP3 into the app/plugin window, or choose it with **Import**. Conversion
 runs locally in the background. On first use, **Download & convert** downloads a 574 MB
-Whisper Turbo model to `~/Library/Application Support/Novox`; the recording is not uploaded.
+Whisper Turbo model to `~/Library/Application Support/Novox` (Windows: `%LOCALAPPDATA%\Novox`);
+the recording is not uploaded.
 **Melody only** skips the model and lyric recognition. No Python or ffmpeg installation is needed.
 Files are limited to 64 MB and five minutes, with mono or stereo audio.
 
@@ -210,7 +237,8 @@ import's original audio is retained with the project or a saved `.novox` song (1
 2.5 MB a minute; a recording that a later import covered completely is left out). **Open**, **Save**, and **Save As…** manage song
 files. **Export WAV…/MIDI…** saves the current performance; holding and dragging the **WAV** or
 **MIDI** tile starts a native file drag into your DAW. WAV export starts at timeline zero; any preroll consonant
-before zero is trimmed. Dragged files remain in Application Support/Novox/Exports.
+before zero is trimmed. Dragged files remain in Application Support/Novox/Exports (Windows:
+`%LOCALAPPDATA%\Novox\Exports`). What differs on Windows is listed in [docs/HOSTS.md](docs/HOSTS.md#windows).
 The [feature roadmap](docs/FEATURE-TODO.md) tracks remaining work.
 
 Select one note and choose **Edit > Split syllables…** to enter `re-mem-ber`; resize the resulting

@@ -17,6 +17,8 @@
 #include "../Source/AudioImport.h"
 #include "../Source/MicrophoneCapture.h"
 #include "../Source/HostMmc.h"
+#include "../Source/Platform.h"
+#include "../Source/PluginEditor.h"
 #if JUCE_MAC
 bool testNovoxRegionDrops();
 #endif
@@ -274,12 +276,78 @@ void testRenderStateChanges() {
   CHECK(reader && reader->sampleRate == 44100);
 }
 
+// The editor's page, or nullptr where it shows the WebView2-missing message instead.
+juce::WebBrowserComponent* webBrowserOf(juce::Component& editor) {
+  for (auto* child : editor.getChildren())
+    if (auto* browser = dynamic_cast<juce::WebBrowserComponent*>(child)) return browser;
+  return nullptr;
+}
+
+// --webview-smoke: the editor's page in its real web view (on Windows, WebView2; the editor checks
+// in main only see that the runtime was found). The page loads from the resource provider, boots
+// with its song and voices from native functions, and gets the editor's status. The editor is on
+// screen for a few seconds, so this runs only when asked for (Windows CI).
+void testWebView() {
+  // What the page says once it has booted (app.js keeps its state in window.__novox).
+  const juce::String script = R"js((() => {
+    const app = window.__novox;
+    if (!window.__JUCE__) return "waiting: no native bridge at " + location.href;
+    if (!app || !app.S.loaded || !app.S.status?.platform) return "waiting: the page is booting";
+    const S = app.S;
+    return JSON.stringify({ platform: S.status.platform, audio: S.status.importTypes?.audio || [], voices: S.voices,
+      accept: document.getElementById("file").accept, agent: navigator.userAgent });
+  })())js";
+  juce::String answer = "no answer";
+  bool asking = false;
+  NovoxProcessor processor;
+  std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
+  auto* browser = webBrowserOf(*editor);
+  CHECK(browser != nullptr);
+  if (browser) {
+    editor->addToDesktop(juce::ComponentPeer::windowHasTitleBar);
+    editor->setVisible(true);
+    const auto until = juce::Time::getMillisecondCounterHiRes() + 60000;
+    while (!answer.startsWith("{") && juce::Time::getMillisecondCounterHiRes() < until) {
+      if (!asking) {
+        asking = true;
+        browser->evaluateJavascript(script, [&answer, &asking](juce::WebBrowserComponent::EvaluationResult result) {
+          asking = false;
+          if (const auto* value = result.getResult()) answer = value->toString();
+          else if (const auto* error = result.getError()) answer = "script error: " + error->message;
+        });
+      }
+      pump(0.1);
+    }
+  }
+  std::cout << "web view: " << answer << std::endl;
+  const auto page = juce::JSON::parse(answer);
+  const auto strings = [](const juce::var& list) {
+    juce::StringArray out;
+    if (const auto* items = list.getArray())
+      for (const auto& item : *items) out.add(item.toString());
+    return out;
+  };
+  CHECK(page["platform"].toString() == NovoxPlatform::name());
+  CHECK(strings(page["audio"]) == AudioImport::extensions());
+  CHECK(strings(page["voices"]).contains("robot"));
+  const auto accept = page["accept"].toString();
+  for (const auto& extension : AudioImport::extensions()) CHECK(accept.contains("." + extension));
+  CHECK(accept.contains(".m4a") == AudioImport::extensions().contains("m4a"));
+  editor.reset();
+  pump(0.2);  // with answer and asking still here for a late reply
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   juce::ScopedJuceInitialiser_GUI init;
   if (argc >= 2 && juce::String(argv[1]) == "--render-state-smoke") {
     testRenderStateChanges();
+    std::cout << checks << " checks, " << failures << " failures" << std::endl;
+    return failures ? 1 : 0;
+  }
+  if (argc >= 2 && juce::String(argv[1]) == "--webview-smoke") {
+    testWebView();
     std::cout << checks << " checks, " << failures << " failures" << std::endl;
     return failures ? 1 : 0;
   }
@@ -883,7 +951,7 @@ int main(int argc, char** argv) {
       juce::AudioBuffer<float> tone(1, 44100);
       for (int i = 0; i < tone.getNumSamples(); ++i) {
         const double t = i / 44100.0, env = std::min(1.0, std::min(t, 1.0 - t) / .05);
-        tone.setSample(0, i, static_cast<float>(env * (.3 * std::sin(2 * M_PI * 220 * t) + .15 * std::sin(4 * M_PI * 220 * t))));
+        tone.setSample(0, i, static_cast<float>(env * (.3 * std::sin(2 * juce::MathConstants<double>::pi * 220 * t) + .15 * std::sin(4 * juce::MathConstants<double>::pi * 220 * t))));
       }
       if (writer) writer->writeFromAudioSampleBuffer(tone, 0, tone.getNumSamples());
     }
@@ -911,7 +979,7 @@ int main(int argc, char** argv) {
     juce::AudioBuffer<float> tone(1, 44100);
     for (int i = 0; i < tone.getNumSamples(); ++i) {
       const double t = i / 44100.0, env = std::min(1.0, std::min(t, 1.0 - t) / .05);
-      tone.setSample(0, i, static_cast<float>(env * (.3 * std::sin(2 * M_PI * 220 * t) + .15 * std::sin(4 * M_PI * 220 * t))));
+      tone.setSample(0, i, static_cast<float>(env * (.3 * std::sin(2 * juce::MathConstants<double>::pi * 220 * t) + .15 * std::sin(4 * juce::MathConstants<double>::pi * 220 * t))));
     }
     const juce::StringArray logicMarkers{"Tempo: 120.0", "Start", "End  ", "Timestamp: 158826150"};  // 01:00:01.5
     const auto region = logicAiff(tone, logicMarkers, "Logic Pro 12.4");
@@ -1010,7 +1078,7 @@ int main(int argc, char** argv) {
     }
     // The engine takes those words (it threw on the old ones).
     std::vector<float> tone(static_cast<size_t>(seconds * 16000));
-    for (size_t i = 0; i < tone.size(); ++i) tone[i] = static_cast<float>(.3 * std::sin(2 * M_PI * 220 * i / 16000.0));
+    for (size_t i = 0; i < tone.size(); ++i) tone[i] = static_cast<float>(.3 * std::sin(2 * juce::MathConstants<double>::pi * 220 * i / 16000.0));
     std::unique_ptr<novox_engine, decltype(&novox_destroy)> engine(novox_create(44100), novox_destroy);
     const auto wordJson = juce::JSON::toString(juce::var(words));
     char* raw = novox_transcribe(engine.get(), tone.data(), tone.size(), 16000, wordJson.toRawUTF8(),
@@ -1029,7 +1097,7 @@ int main(int argc, char** argv) {
     juce::AudioBuffer<float> tone(1, 32000);
     for (int i = 0; i < tone.getNumSamples(); ++i) {
       const double t = i / 16000.0, env = std::min(1.0, std::min(t, 2.0 - t) / .05);
-      tone.setSample(0, i, static_cast<float>(env * (.3 * std::sin(2 * M_PI * 220 * t) + .15 * std::sin(4 * M_PI * 220 * t))));
+      tone.setSample(0, i, static_cast<float>(env * (.3 * std::sin(2 * juce::MathConstants<double>::pi * 220 * t) + .15 * std::sin(4 * juce::MathConstants<double>::pi * 220 * t))));
     }
     const auto wav = MicrophoneCapture::encode(tone, tone.getNumSamples(), 16000);
     for (const bool detail : {false, true}) {
@@ -1055,12 +1123,64 @@ int main(int argc, char** argv) {
   {
     std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
     CHECK(editor->isResizable());
+    // The page, not the WebView2-missing message: on Windows, the WebView2 runtime is installed.
+    CHECK(webBrowserOf(*editor) != nullptr);
     CHECK(editor->getWidth()==1000 && editor->getHeight()==660);
     editor->setSize(1280,800);
     CHECK(p.editorSize==juce::Point<int>(1280,800));
     editor.reset();
     editor.reset(p.createEditor());
     CHECK(editor->getWidth()==1280 && editor->getHeight()==800);
+  }
+  // Without a web view (a Windows PC without the WebView2 runtime) the editor says where to get one
+  // instead of showing a blank page, keeps its size, and goes away cleanly.
+  {
+    NovoxEditor::testWithoutWebView = true;
+    std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
+    NovoxEditor::testWithoutWebView = false;
+    const juce::HyperlinkButton* link = nullptr;
+    for (auto* child : editor->getChildren())
+      if (auto* l = dynamic_cast<juce::HyperlinkButton*>(child)) link = l;
+    CHECK(webBrowserOf(*editor) == nullptr && link != nullptr && link->isVisible());
+    CHECK(link && link->getURL().toString(false) == "https://developer.microsoft.com/microsoft-edge/webview2/");
+    CHECK(link && editor->getLocalBounds().contains(link->getBounds()));
+    CHECK(editor->getWidth()==1280 && editor->getHeight()==800);
+    editor->setSize(800, 560);
+    CHECK(link && editor->getLocalBounds().contains(link->getBounds()) && p.editorSize==juce::Point<int>(800,560));
+    pump(0.1);
+    editor.reset();
+    p.editorSize = {1280, 800};
+  }
+  // This platform's files (Platform.h) and audio imports: every audio type the editor offers has a
+  // decoder here, and every candidate with one is offered (m4a needs Core Audio, macOS only).
+  {
+#if JUCE_MAC
+    CHECK(juce::String(NovoxPlatform::name()) == "mac");
+    CHECK(NovoxPlatform::dataFolder() ==
+          juce::File::getSpecialLocation(juce::File::userHomeDirectory).getChildFile("Library/Application Support/Novox"));
+#elif JUCE_WINDOWS
+    CHECK(juce::String(NovoxPlatform::name()) == "windows");
+    CHECK(NovoxPlatform::dataFolder() == juce::File::getSpecialLocation(juce::File::windowsLocalAppData).getChildFile("Novox"));
+#endif
+    CHECK(AudioImport::modelFile().getParentDirectory() == NovoxPlatform::dataFolder());
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    for (const auto* extension : {"wav", "mp3", "aif", "aiff", "m4a", "flac", "ogg"})
+      CHECK(AudioImport::extensions().contains(extension) == (formats.findFormatForFileExtension(extension) != nullptr));
+#if JUCE_MAC
+    CHECK(AudioImport::extensions().contains("m4a"));
+#else
+    CHECK(!AudioImport::extensions().contains("m4a"));
+#endif
+    // Lyrics recognition runs here (a Windows PC needs AVX2; CI runners have it), on 4 threads
+    // except on Windows (one per physical core but one, at most 8).
+    CHECK(AudioImport::recognitionUnavailable().isEmpty());
+    const int threads = AudioImport::recognitionThreads();
+#if JUCE_WINDOWS
+    CHECK(threads >= 1 && threads <= 8);
+#else
+    CHECK(threads == 4);
+#endif
   }
   FakePlayHead ph;
   p.setPlayHead(&ph);

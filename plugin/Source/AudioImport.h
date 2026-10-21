@@ -20,6 +20,16 @@ class AudioImport : private juce::Thread {
   juce::var preview(const juce::String& score);
   juce::var status() const;
   static juce::File modelFile();
+  // The audio files an import decodes here, by extension (without the dot): JUCE's readers for
+  // WAV, MP3, AIFF, FLAC and Ogg, and on macOS Core Audio's for m4a (AAC/ALAC), which Windows lacks.
+  static const juce::StringArray& extensions();
+  // Why lyrics recognition cannot run on this computer, or "" when it can. Windows builds use
+  // ggml's AVX2 baseline (plugin/CMakeLists.txt: AVX2, FMA, F16C, BMI2), which some older or
+  // low-end CPUs lack.
+  static juce::String recognitionUnavailable();
+  // whisper.cpp's CPU threads: 4 on macOS (Metal does the heavy work there) and Linux; on Windows,
+  // where it all runs on the CPU, one per physical core but one, at most 8.
+  static int recognitionThreads();
   // The novox_transcribe options of an import (JSON).
   static juce::String transcribeOptions(bool detailedNotes);
   // One recognized whisper piece: its text as decoded (a leading space starts a word), the time

@@ -16,7 +16,13 @@ extern "C" {
 #endif
 
 #if defined(_WIN32)
+/* Only the DLL exports the API (its build defines NOVOX_BUILDING_DLL). Static
+ * linking, and calls through the DLL's import library, need no attribute. */
+#if defined(NOVOX_BUILDING_DLL)
 #define NOVOX_API __declspec(dllexport)
+#else
+#define NOVOX_API
+#endif
 #else
 #define NOVOX_API __attribute__((visibility("default")))
 #endif

@@ -14,3 +14,6 @@ build-release/
 .env.*
 !.env.example
 .dev.vars
+
+# Microsoft's WebView2 bootstrapper is downloaded when the Windows installer is built (packaging/windows).
+MicrosoftEdgeWebview2Setup.exe

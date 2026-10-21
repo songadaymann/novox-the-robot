@@ -17,11 +17,16 @@ class NovoxEditor : public juce::AudioProcessorEditor, private juce::Timer, publ
   void paint(juce::Graphics&) override;
   bool isInterestedInFileDrag(const juce::StringArray&) override;
   void filesDropped(const juce::StringArray&, int, int) override;
+  // Development hook (NovoxPluginTests): editors made while it is set act as on a Windows PC
+  // without the WebView2 runtime. The plugin never sets it.
+  static inline bool testWithoutWebView = false;
 
  private:
   void timerCallback() override;
   juce::WebBrowserComponent::Options makeOptions();
   static std::optional<juce::WebBrowserComponent::Resource> getResource(const juce::String& url);
+  void emit(const juce::Identifier& event, const juce::var& value);
+  void showWebViewMissing();
 
   void* regionDrop_ = nullptr;
   void* selectAllMonitor_ = nullptr;
@@ -34,7 +39,12 @@ class NovoxEditor : public juce::AudioProcessorEditor, private juce::Timer, publ
   juce::MemoryBlock pendingAudio_;
   juce::String pendingName_;
   NovoxProcessor& proc_;
-  juce::WebBrowserComponent browser_;
+  // Shown instead of the page when Windows has no WebView2 runtime (JUCE would fall back to
+  // Internet Explorer, which cannot run it).
+  juce::Label webViewMissing_;
+  juce::HyperlinkButton webViewDownload_;
+  // The page; none without WebView2. Last, so it goes first: its native functions use the rest.
+  std::unique_ptr<juce::WebBrowserComponent> browser_;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NovoxEditor)
 };

@@ -1,6 +1,8 @@
 // node plugin/Tests/NoteLyricsTests.mjs --novox build/novox --library build/libnovox.dylib
 // Uses the native token API and native planner; checks a note edit, its pane
 // mirror, and a second plan flowed from that pane text all agree acoustically.
+// Skipped without a built engine, unless --novox or --library asked for one (CI).
+// Windows (Visual Studio build): --novox build\Release\novox.exe --library build\Release\novox.dll
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -10,14 +12,21 @@ import { labelNotes, lyricsFromNotes } from '../ui/lyric-text.js';
 
 const args = process.argv.slice(2);
 const arg = (name, fallback) => { const i = args.indexOf(name); return i < 0 ? fallback : args[i + 1]; };
-const cli = resolve(arg('--novox', 'build/novox'));
-const library = resolve(arg('--library', process.platform === 'darwin' ? 'build/libnovox.dylib' : 'build/libnovox.so'));
+const windows = process.platform === 'win32';
+const cli = resolve(arg('--novox', windows ? 'build/Release/novox.exe' : 'build/novox'));
+const library = resolve(arg('--library', windows ? 'build/Release/novox.dll' : process.platform === 'darwin' ? 'build/libnovox.dylib' : 'build/libnovox.so'));
 // The project's own (native arm64) Python when present: a system python3 may be x86 and unable to
 // load an arm64 libnovox.
 const venvPython = resolve('tools/.venv/bin/python');
-const python = arg('--python', process.env.PYTHON || (existsSync(venvPython) ? venvPython : 'python3'));
+const python = arg('--python', process.env.PYTHON || (existsSync(venvPython) ? venvPython : windows ? 'python' : 'python3'));
+if (!existsSync(cli) || !existsSync(library)) {
+  const missing = `no engine CLI at ${cli} or library at ${library}`;
+  if (args.includes('--novox') || args.includes('--library')) { console.error(`Note lyric edits: ${missing}`); process.exit(1); }
+  console.log(`Note lyric edits: skipped (${missing})`);
+  process.exit(0);
+}
 const bpm = 120;
-const plan = score => JSON.parse(execFileSync(cli, ['plan', '/dev/stdin'], { input: JSON.stringify(score), encoding: 'utf8' }));
+const plan = score => JSON.parse(execFileSync(cli, ['plan', '-'], { input: JSON.stringify(score), encoding: 'utf8' }));
 const tokens = (text, dictionary = {}) => JSON.parse(execFileSync(python, ['-c', `
 import ctypes, json, sys
 lib = ctypes.CDLL(sys.argv[1])

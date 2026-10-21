@@ -1,4 +1,5 @@
 #include "AudioImport.h"
+#include "Platform.h"
 #include "novox.h"
 #include "transcribe.hpp"
 #include "whisper.h"
@@ -6,6 +7,10 @@
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
+#if JUCE_WINDOWS && JUCE_INTEL
+#include <immintrin.h>
+#include <intrin.h>
+#endif
 
 namespace {
 constexpr int rate = 16000;
@@ -23,6 +28,22 @@ constexpr double minWordSeconds = 0.02;
 // juce::String reads a plain char* as ASCII, so text with "…" or "–" must say it is UTF-8
 // (otherwise the LCD shows "â€¦").
 juce::String utf8(const char* text) { return juce::String::fromUTF8(text); }
+#if JUCE_WINDOWS && JUCE_INTEL
+// Whether this PC runs ggml's Windows build (plugin/CMakeLists.txt): /arch:AVX2 code that also uses
+// FMA, F16C and BMI2, on AVX registers Windows must save (XSAVE). JUCE's hasAVX2() reads the AVX2
+// bit alone, which a virtual machine may report without the rest or with AVX turned off.
+bool runsGgmlBaseline() {
+  const auto has = [](int bits, int bit) { return ((static_cast<unsigned>(bits) >> bit) & 1u) != 0; };
+  int info[4] = {};
+  __cpuid(info, 0);
+  if (info[0] < 7) return false;
+  __cpuid(info, 1);
+  if (!has(info[2], 12) || !has(info[2], 27) || !has(info[2], 28) || !has(info[2], 29)) return false;  // FMA, OSXSAVE, AVX, F16C
+  if ((_xgetbv(0) & 6) != 6) return false;  // Windows saves the SSE and AVX registers
+  __cpuidex(info, 7, 0);
+  return has(info[1], 3) && has(info[1], 5) && has(info[1], 8);  // BMI1, AVX2, BMI2
+}
+#endif
 juce::var errorResult(const juce::String& message) {
   auto* o = new juce::DynamicObject(); o->setProperty("error", message); return juce::var(o);
 }
@@ -123,11 +144,29 @@ AudioImport::TimelineStamp stampOf(const juce::AudioFormatReader& reader, const 
 AudioImport::AudioImport() : juce::Thread("Novox audio import") {}
 AudioImport::~AudioImport() { cancel(); stopThread(-1); }
 juce::File AudioImport::modelFile() {
-  return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+  return NovoxPlatform::dataFolder().getChildFile("ggml-large-v3-turbo-q5_0.bin");
+}
+const juce::StringArray& AudioImport::extensions() {
 #if JUCE_MAC
-      .getChildFile("Application Support")
+  static const juce::StringArray list{"wav", "mp3", "aif", "aiff", "m4a", "flac", "ogg"};
+#else
+  static const juce::StringArray list{"wav", "mp3", "aif", "aiff", "flac", "ogg"};
 #endif
-      .getChildFile("Novox").getChildFile("ggml-large-v3-turbo-q5_0.bin");
+  return list;
+}
+juce::String AudioImport::recognitionUnavailable() {
+#if JUCE_WINDOWS && JUCE_INTEL
+  if (!runsGgmlBaseline())
+    return "Lyrics recognition needs a processor with AVX2, which this PC lacks. Import again and choose Melody only";
+#endif
+  return {};
+}
+int AudioImport::recognitionThreads() {
+#if JUCE_WINDOWS
+  return juce::jlimit(1, 8, juce::SystemStats::getNumPhysicalCpus() - 1);
+#else
+  return 4;
+#endif
 }
 void AudioImport::publish(const juce::String& state, const juce::String& message, juce::var result) {
   std::lock_guard<std::mutex> lock(mutex_); state_ = state; message_ = message; result_ = result;
@@ -357,6 +396,8 @@ juce::var AudioImport::start(juce::MemoryBlock data, juce::String name, bool dow
   if (data.getSize() == 0) return errorResult("The recording is empty or could not be read");
   if (data.getSize() > 64 * 1024 * 1024)
     return errorResult("Choose an audio file smaller than 64 MB");
+  // Before the model download: it is 574 MB this computer could not use.
+  if (const auto why = recognitionUnavailable(); !melodyOnly && why.isNotEmpty()) return errorResult(why);
   if (!melodyOnly && modelFile().getSize() != modelBytes && !download)
     return errorResult("The local lyrics model must be downloaded first");
   previewScore_.clear();
@@ -488,8 +529,8 @@ void AudioImport::run() {
       params.dtw_token_timestamps = true;
       params.dtw_aheads_preset = WHISPER_AHEADS_LARGE_V3_TURBO;
       ctx.reset(whisper_init_from_file_with_params(model.getFullPathName().toRawUTF8(), params));
-      if (!ctx) throw std::runtime_error("Cannot load lyrics model. Delete it from Application Support/Novox and retry");
-      wp.language = "en"; wp.n_threads = 4; wp.no_context = true;
+      if (!ctx) throw std::runtime_error(("Cannot load lyrics model. Delete it from " + NovoxPlatform::dataFolderName() + " and retry").toStdString());
+      wp.language = "en"; wp.n_threads = recognitionThreads(); wp.no_context = true;
       wp.token_timestamps = true;
       wp.entropy_thold = repetitionEntropy;
       wp.print_progress = wp.print_realtime = wp.print_timestamps = wp.print_special = false;

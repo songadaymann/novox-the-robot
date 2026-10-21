@@ -1,0 +1,226 @@
+# Windows x64 build of the plugin: the VST3, the standalone app and their installer, built and
+# tested on every push and pull request. On a v* tag, the installer is attached to that tag's
+# GitHub release as Novox-The-Robot-Windows-Setup.exe, with its SHA-256 in SHA256SUMS-Windows. The
+# installer is unsigned for now; see packaging/windows/README.md.
+name: Plugin (Windows)
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5   # embeds the pronouncing dictionary; NoteLyricsTests
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v4     # the UI tests
+        with: { node-version: "22" }
+
+      # Fetches JUCE, whisper.cpp and Microsoft's WebView2 SDK into the build folder. Visual Studio
+      # ignores CMAKE_BUILD_TYPE: the configuration is chosen at build time.
+      - name: Configure
+        run: cmake -S . -B build-plugin -A x64 -DNOVOX_BUILD_PLUGIN=ON -DNOVOX_INSTALL_AFTER_BUILD=OFF
+
+      # Everything is linked with the static C runtime (/MT) except Microsoft's prebuilt WebView2
+      # loader. If it were built for the DLL runtime (/MD), the editor targets would fail to link
+      # (LNK2038) or need the Visual C++ Redistributable, so this checks it before the long build.
+      # Should it ever fail: build with JUCE_USE_WIN_WEBVIEW2=1 instead of the static-linking define
+      # and ship the SDK's WebView2Loader.dll next to the app and inside the VST3 bundle.
+      - name: Check the WebView2 loader's C runtime
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $dumpbin = & $vswhere -latest -products '*' -find 'VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe' | Select-Object -First 1
+          if (-not $dumpbin) { throw 'dumpbin.exe not found' }
+          "DUMPBIN=$dumpbin" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $found = Select-String -Path build-plugin/CMakeCache.txt -Pattern '^WebView2_root_dir:[A-Z]+=(.+)$' | Select-Object -First 1
+          if (-not $found) { throw 'WebView2_root_dir is not in build-plugin/CMakeCache.txt' }
+          $loader = Join-Path $found.Matches[0].Groups[1].Value 'build/native/x64/WebView2LoaderStatic.lib'
+          $directives = & $dumpbin /nologo /directives $loader |
+            Where-Object { $_ -match '/(FAILIFMISMATCH|DEFAULTLIB)' } | ForEach-Object { $_.Trim() } | Sort-Object -Unique
+          Write-Output "${loader}: $($directives -join ' ')"
+          $dynamic = $directives | Where-Object { $_ -match 'RuntimeLibrary=MD|/DEFAULTLIB:"?(msvcrt|msvcprt|vcruntime|ucrt)' }
+          if ($dynamic) { throw "The WebView2 loader is built for the DLL runtime: $($dynamic -join ', ')" }
+
+      - name: Build
+        run: >
+          cmake --build build-plugin --config Release --parallel
+          --target NovoxTheRobot_VST3 NovoxTheRobot_Standalone NovoxPluginTests novox_tests novox novox_shared
+
+      - name: Engine tests
+        run: ctest --test-dir build-plugin -C Release --output-on-failure
+      - name: Command-line tool
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $plan = & build-plugin/Release/novox.exe plan scores/demo.json | Out-String | ConvertFrom-Json
+          if (-not $plan.syllables) { throw 'novox.exe plan printed no syllables' }
+          & build-plugin/Release/novox.exe render scores/demo.json -o build-plugin/demo.wav
+          if ((Get-Item build-plugin/demo.wav).Length -le 44) { throw 'novox.exe render wrote no audio' }
+          Write-Output "novox.exe planned $($plan.syllables.Count) syllables and rendered scores/demo.json"
+
+      # Microsoft's Evergreen WebView2 bootstrapper (about 2 MB), downloaded for each build and never
+      # committed. The installer runs it only on PCs that have no WebView2 Runtime; the plugin tests
+      # below open the editor, so it also installs the runtime here if this runner lacks it.
+      - name: WebView2 Runtime
+        run: |
+          New-Item -ItemType Directory -Force build-plugin/installer | Out-Null
+          $setup = 'build-plugin/installer/MicrosoftEdgeWebview2Setup.exe'
+          Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $setup
+          $signature = Get-AuthenticodeSignature $setup
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+            throw "The WebView2 bootstrapper is not signed by Microsoft: $($signature.Status), $($signature.SignerCertificate.Subject)"
+          }
+          # As the installer checks (novox.iss, NeedsWebView2): the runtime's version, per machine or per user.
+          $client = 'Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          function RuntimeVersion {
+            foreach ($key in "HKLM:\SOFTWARE\WOW6432Node\$client", "HKCU:\Software\$client") {
+              $version = (Get-ItemProperty -Path $key -Name pv -ErrorAction SilentlyContinue).pv
+              if ($version -and $version -ne '0.0.0.0') { return $version }
+            }
+          }
+          $version = RuntimeVersion
+          if (-not $version) {
+            $install = Start-Process -FilePath (Resolve-Path $setup) -ArgumentList '/silent', '/install' -Wait -PassThru
+            $version = RuntimeVersion
+            if (-not $version) { throw "The WebView2 Runtime did not install (bootstrapper exit code $($install.ExitCode))" }
+            Write-Output "Installed the WebView2 Runtime $version"
+          } else {
+            Write-Output "The WebView2 Runtime $version is installed"
+          }
+
+      - name: Plugin tests
+        run: ./build-plugin/plugin/NovoxPluginTests_artefacts/Release/NovoxPluginTests.exe
+      # The editor on screen in WebView2: the page loads, boots through the plugin's native functions
+      # and gets its status (PluginTests.cpp, testWebView).
+      - name: Editor in WebView2
+        run: ./build-plugin/plugin/NovoxPluginTests_artefacts/Release/NovoxPluginTests.exe --webview-smoke
+      # Every file runs, and any failure fails the step. The tests that check against the real engine
+      # get the CLI and the DLL; asked for them, they fail rather than skip when they are missing.
+      - name: UI tests
+        shell: bash
+        run: |
+          failed=0
+          cli=build-plugin/Release/novox.exe
+          for test in plugin/Tests/*.mjs; do
+            case "$test" in
+              */NoteLyricsTests.mjs) args=(--novox "$cli" --library build-plugin/Release/novox.dll --python python) ;;
+              */LyricRoundTrip.mjs | */MelodyClipboardTests.mjs) args=(--novox "$cli") ;;
+              *) args=() ;;
+            esac
+            echo "== $test ${args[*]}"
+            node "$test" "${args[@]}" || { echo "::error::$test failed"; failed=1; }
+          done
+          exit "$failed"
+
+      # What the build settings promise: no Visual C++ Redistributable (static runtime), no OpenMP
+      # runtime, the WebView2 loader linked in, and the C API exported by novox.dll alone.
+      - name: Check the binaries
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $dumpbin = $env:DUMPBIN
+          $artefacts = 'build-plugin/plugin/NovoxTheRobot_artefacts/Release'
+          $binaries = @(
+            "$artefacts/Standalone/Novox The Robot.exe",
+            "$artefacts/VST3/Novox The Robot.vst3/Contents/x86_64-win/Novox The Robot.vst3",
+            'build-plugin/plugin/NovoxPluginTests_artefacts/Release/NovoxPluginTests.exe',
+            'build-plugin/Release/novox.exe',
+            'build-plugin/Release/novox.dll')
+          foreach ($binary in $binaries) {
+            $dependents = & $dumpbin /nologo /dependents $binary | Where-Object { $_ -match '^\s+\S+\.dll$' } | ForEach-Object { $_.Trim() }
+            Write-Output "$binary -> $($dependents -join ', ')"
+            $runtime = $dependents | Where-Object { $_ -match '^(vcruntime|msvcp|vcomp|ucrtbase|api-ms-win-crt-|WebView2Loader)' }
+            if ($runtime) { throw "$binary needs $($runtime -join ', ')" }
+          }
+          $api = Select-String -Path engine/include/novox.h -Pattern '^NOVOX_API [^(]*?\b(novox_\w+)\(' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value } | Sort-Object
+          $exports = & $dumpbin /nologo /exports build-plugin/Release/novox.dll |
+            ForEach-Object { if ($_ -match '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]+\s+(\w+)') { $Matches[1] } } | Sort-Object
+          if (-not $exports -or (Compare-Object $api $exports)) {
+            throw "novox.dll exports [$($exports -join ', ')]; novox.h declares [$($api -join ', ')]"
+          }
+          $cliExports = & $dumpbin /nologo /exports build-plugin/Release/novox.exe |
+            Where-Object { $_ -match '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]+\s+\w+' }
+          if ($cliExports) { throw "novox.exe exports functions: $cliExports" }
+          if (-not (Test-Path build-plugin/Release/novox_static.lib)) { throw 'novox_static.lib is missing' }
+          Write-Output "novox.dll exports the $($api.Count) functions of novox.h; novox.exe exports none"
+
+      # The version comes from CMake. The license page: our notices, the WebView2 SDK's license and
+      # notices (its loader is linked into the app and the VST3), then the AGPLv3.
+      - name: Build the installer
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          function Cached([string]$Name) {
+            $found = Select-String -Path build-plugin/CMakeCache.txt -Pattern ('^{0}:[A-Z]+=(.+)$' -f $Name) | Select-Object -First 1
+            if (-not $found) { throw "$Name is not in build-plugin/CMakeCache.txt" }
+            $found.Matches[0].Groups[1].Value
+          }
+          $version = Cached CMAKE_PROJECT_VERSION
+          $label = Cached NOVOX_VERSION_LABEL
+          $webview2 = Cached WebView2_root_dir
+          $license = @(
+            Get-Content -Raw packaging/macos/license.txt
+            'The Microsoft WebView2 SDK license and notices (for the WebView2 loader):'
+            Get-Content -Raw (Join-Path $webview2 LICENSE.txt)
+            Get-Content -Raw (Join-Path $webview2 NOTICE.txt)
+            Get-Content -Raw plugin/LICENSE-AGPL-3.0.txt
+          ) | ForEach-Object { $_.Trim() }
+          $license = ($license -join "`n`n") -replace "`r?`n", "`r`n"
+          Set-Content -Path build-plugin/installer/license.txt -Value $license -Encoding utf8BOM
+
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc packaging/windows/novox.iss `
+            "/DNovoxVersion=$version" "/DNovoxLabel=$label" `
+            "/DArtefacts=$(Resolve-Path build-plugin/plugin/NovoxTheRobot_artefacts/Release)" `
+            "/DLicenseFile=$(Resolve-Path build-plugin/installer/license.txt)" `
+            "/DWebView2Setup=$(Resolve-Path build-plugin/installer/MicrosoftEdgeWebview2Setup.exe)" `
+            "/DOutputDir=$PWD\out\release"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Novox-The-Robot-Windows-VST3
+          path: build-plugin/plugin/NovoxTheRobot_artefacts/Release/VST3/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Novox-The-Robot-Windows-App
+          path: build-plugin/plugin/NovoxTheRobot_artefacts/Release/Standalone/Novox The Robot.exe
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Novox-The-Robot-Windows-Setup
+          path: out/release/Novox-The-Robot-Windows-Setup.exe
+          if-no-files-found: error
+
+  # A separate job, so only this step can write to the repository.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: Novox-The-Robot-Windows-Setup }
+      # The Mac installer's checksum is in SHA256SUMS (scripts/package-mac.sh); this one gets its own
+      # file, in the same format, so neither upload overwrites the other.
+      - name: Attach the installer and its checksum to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null; then
+            echo "::error::There is no GitHub release for $TAG yet. Create it, then re-run this job."
+            exit 1
+          fi
+          sha256sum Novox-The-Robot-Windows-Setup.exe > SHA256SUMS-Windows
+          cat SHA256SUMS-Windows
+          gh release upload "$TAG" Novox-The-Robot-Windows-Setup.exe SHA256SUMS-Windows --clobber

@@ -5,6 +5,9 @@
 //   novox say "some words" -o out.wav [--pitch C4] [--voice female]
 //   novox phonemes "some words"
 //   novox voices
+//
+// A score or words file of "-" is read from standard input (like /dev/stdin on macOS and Linux,
+// which Windows lacks).
 
 #include <cstdlib>
 #include <algorithm>
@@ -18,6 +21,11 @@
 #include <vector>
 
 #include "novox.h"
+
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
 
 namespace {
 
@@ -89,9 +97,16 @@ bool readWav(const std::string& path, std::vector<float>& out, double& rate, std
 }
 
 std::string readFile(const std::string& path) {
+  std::stringstream ss;
+  if (path == "-") {
+#ifdef _WIN32
+    _setmode(_fileno(stdin), _O_BINARY);  // the bytes as sent, without CR LF translation
+#endif
+    ss << std::cin.rdbuf();
+    return ss.str();
+  }
   std::ifstream f(path, std::ios::binary);
   if (!f) return "";
-  std::stringstream ss;
   ss << f.rdbuf();
   return ss.str();
 }
@@ -110,7 +125,11 @@ std::string findDictionary(const char* argv0, const std::string& flag) {
   if (!flag.empty()) return flag;
   if (const char* env = std::getenv("NOVOX_DICT")) return env;
   std::string exe = argv0;
+#ifdef _WIN32
+  size_t slash = exe.find_last_of("/\\");  // either separator: build\Release\novox.exe
+#else
   size_t slash = exe.find_last_of('/');
+#endif
   std::string dir = slash == std::string::npos ? "." : exe.substr(0, slash);
   for (const char* rel : {"/../data/cmudict.dict", "/../../data/cmudict.dict", "/data/cmudict.dict",
                           "/../../../data/cmudict.dict"}) {
@@ -131,7 +150,8 @@ void usage() {
                "  novox say \"words to sing\" -o <out.wav> [--pitch C4] [--beats 1] [--tempo 100] [--voice NAME]\n"
                "  novox phonemes \"words\"\n"
                "  novox voices\n"
-               "options: --dict PATH  extra cmudict-format dictionary (also $NOVOX_DICT)\n";
+               "options: --dict PATH  extra cmudict-format dictionary (also $NOVOX_DICT)\n"
+               "a score or words file of - is read from standard input\n";
 }
 
 }  // namespace

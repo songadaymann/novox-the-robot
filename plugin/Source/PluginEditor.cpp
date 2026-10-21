@@ -1,14 +1,17 @@
 #include "PluginEditor.h"
 
 #include "BinaryData.h"
+#include "Platform.h"
 
 #if JUCE_MAC
 void* installNovoxSelectAll(juce::Component&, std::function<void()>);
 void removeNovoxSelectAll(void*);
-bool forwardNovoxHostSpace(juce::Component&);
 void* installNovoxRegionDrop(juce::Component&,std::function<void(juce::String)>,std::function<void(juce::String)>);
 void readNovoxRegionDrop(void*);
 void removeNovoxRegionDrop(void*);
+#endif
+#if JUCE_MAC || JUCE_WINDOWS
+bool forwardNovoxHostSpace(juce::Component&);  // MacShortcuts.mm, WinShortcuts.cpp
 #endif
 
 namespace {
@@ -33,6 +36,35 @@ juce::var clipboardReply(const juce::String& text, const juce::String& error = {
   return juce::var(reply);
 }
 
+// The files the editor imports, by extension: audio (AudioImport::extensions) and scores the
+// engine reads. The page gets both in its status (importTypes) for its file picker and messages.
+const juce::StringArray scoreExtensions{"mid", "midi", "xml", "musicxml", "mxl"};
+juce::var importTypes() {
+  auto* o = new juce::DynamicObject();
+  juce::Array<juce::var> audio, score;
+  for (const auto& e : AudioImport::extensions()) audio.add(e);
+  for (const auto& e : scoreExtensions) score.add(e);
+  o->setProperty("audio", audio);
+  o->setProperty("score", score);
+  return juce::var(o);
+}
+
+// Where WebView2 keeps the page's storage (the import options): out of %TEMP%, which Windows
+// cleans up. Other platforms' web views do not use it.
+juce::File webViewFolder() { return NovoxPlatform::dataFolder().getChildFile("WebView2"); }
+
+// Whether the web view can show the editor. Windows needs Microsoft's WebView2 runtime (part of
+// Windows 11 and of most Windows 10 PCs; the installer adds it where it is missing): without it
+// JUCE would fall back to Internet Explorer, which cannot run the page.
+bool webViewAvailable([[maybe_unused]] const juce::WebBrowserComponent::Options& options) {
+  if (NovoxEditor::testWithoutWebView) return false;
+#if JUCE_WINDOWS
+  return juce::WebBrowserComponent::areOptionsSupported(options);
+#else
+  return true;
+#endif
+}
+
 }  // namespace
 
 std::optional<juce::WebBrowserComponent::Resource> NovoxEditor::getResource(const juce::String& url) {
@@ -55,8 +87,7 @@ juce::WebBrowserComponent::Options NovoxEditor::makeOptions() {
   auto& p = proc_;
   return juce::WebBrowserComponent::Options{}
       .withBackend(juce::WebBrowserComponent::Options::Backend::webview2)
-      .withWinWebView2Options(juce::WebBrowserComponent::Options::WinWebView2{}.withUserDataFolder(
-          juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("NovoxTheRobot")))
+      .withWinWebView2Options(juce::WebBrowserComponent::Options::WinWebView2{}.withUserDataFolder(webViewFolder()))
       .withNativeIntegrationEnabled()
       .withResourceProvider([](const juce::String& url) { return getResource(url); })
       .withNativeFunction("writeClipboard", [](const Args& a, Completion done) {
@@ -111,7 +142,7 @@ juce::WebBrowserComponent::Options NovoxEditor::makeOptions() {
         done(juce::var());
       })
       .withNativeFunction("hostSpace", [this](const Args&, Completion done) {
-#if JUCE_MAC
+#if JUCE_MAC || JUCE_WINDOWS
         done(proc_.wrapperType != juce::AudioProcessor::wrapperType_Standalone && forwardNovoxHostSpace(*this));
 #else
         done(false);
@@ -127,7 +158,12 @@ juce::WebBrowserComponent::Options NovoxEditor::makeOptions() {
           juce::MessageManager::callAsync([safe,granted] {
             if (!safe) return;
             safe->microphonePending_=false;
-            safe->microphoneError_=granted ? safe->microphone_.start() : "Microphone permission was denied. Enable it in System Settings.";
+            safe->microphoneError_=granted ? safe->microphone_.start() : "Microphone permission was denied. Enable it in "+NovoxPlatform::microphoneSettings()+".";
+#if JUCE_WINDOWS
+            // Windows grants the request whatever its privacy settings say: there a blocked
+            // microphone fails to open (or records silence, which the page points out).
+            if(granted && safe->microphoneError_.isNotEmpty()) safe->microphoneError_<<juce::String::fromUTF8(" · check ")<<NovoxPlatform::microphoneSettings();
+#endif
           });
         });
         done(juce::var());
@@ -137,7 +173,7 @@ juce::WebBrowserComponent::Options NovoxEditor::makeOptions() {
         pendingAudio_=microphone_.stop();pendingName_="Singing.wav";
         if (pendingAudio_.isEmpty()) {done("No microphone audio was recorded");return;}
         auto* o=new juce::DynamicObject();o->setProperty("name",pendingName_);
-        browser_.emitEventIfBrowserIsVisible("audioFileDrop",juce::var(o));done(juce::var());
+        emit("audioFileDrop",juce::var(o));done(juce::var());
       })
       .withNativeFunction("cancelMicrophone", [this](const Args&, Completion done) {microphone_.cancel();done(juce::var());})
       .withNativeFunction("readNativeDrop", [this](const Args&,Completion done) {
@@ -161,10 +197,10 @@ juce::WebBrowserComponent::Options NovoxEditor::makeOptions() {
         if(error.isNotEmpty()) {done(error);return;}
         if(action.startsWith("drag")) {
           // DAWs may reference dragged audio rather than copying it: keep exports stable.
-          auto folder=juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory).getChildFile("Application Support/Novox/Exports").getChildFile(juce::Uuid().toString());
+          auto folder=NovoxPlatform::dataFolder().getChildFile("Exports").getChildFile(juce::Uuid().toString());
           folder.createDirectory();auto file=folder.getChildFile("Novox The Robot."+extension);
           if(!file.replaceWithData(bytes.getData(),bytes.getSize())) {done("Could not create export");return;}
-          const bool started=juce::DragAndDropContainer::performExternalDragDropOfFiles({file.getFullPathName()},false,&browser_);
+          const bool started=juce::DragAndDropContainer::performExternalDragDropOfFiles({file.getFullPathName()},false,browser_.get());
           if(!started) folder.deleteRecursively();done(started?juce::String():"Keep the mouse held while dragging; you can also use Export");return;
         }
         if(action=="save" && songFile_.existsAsFile()) {done(songFile_.replaceWithData(bytes.getData(),bytes.getSize()) ? juce::String() : "Could not save song");return;}
@@ -302,19 +338,47 @@ juce::WebBrowserComponent::Options NovoxEditor::makeOptions() {
       });
 }
 
-NovoxEditor::NovoxEditor(NovoxProcessor& p) : juce::AudioProcessorEditor(p), proc_(p), browser_(makeOptions()) {
+NovoxEditor::NovoxEditor(NovoxProcessor& p) : juce::AudioProcessorEditor(p), proc_(p) {
   const auto initialSize = proc_.editorSize;
-  addAndMakeVisible(browser_);
-  browser_.goToURL(juce::WebBrowserComponent::getResourceProviderRoot());
+  const auto options = makeOptions();
+#if JUCE_WINDOWS
+  webViewFolder().createDirectory();
+#endif
+  if (webViewAvailable(options)) {
+    browser_ = std::make_unique<juce::WebBrowserComponent>(options);
+    addAndMakeVisible(*browser_);
+    browser_->goToURL(juce::WebBrowserComponent::getResourceProviderRoot());
+  } else showWebViewMissing();
   setResizable(true, true);
   setResizeLimits(760, 520, 2400, 1600);
   setSize(initialSize.x, initialSize.y);
+  if (!browser_) return;
 #if JUCE_MAC
-  selectAllMonitor_ = installNovoxSelectAll(browser_, [this] {
-    browser_.evaluateJavascript("window.dispatchEvent(new Event('novox-select-all'))");
+  selectAllMonitor_ = installNovoxSelectAll(*browser_, [this] {
+    browser_->evaluateJavascript("window.dispatchEvent(new Event('novox-select-all'))");
   });
 #endif
   startTimerHz(30);
+}
+
+void NovoxEditor::showWebViewMissing() {
+  webViewMissing_.setText("This editor needs the Microsoft Edge WebView2 Runtime, which this PC doesn't seem to have. "
+                          "Novox still sings the song saved with the project.\n\n"
+                          "Install the runtime (free, from Microsoft), then close and reopen this window.",
+                          juce::dontSendNotification);
+  webViewMissing_.setFont(juce::Font(juce::FontOptions(17.0f)));
+  webViewMissing_.setJustificationType(juce::Justification::centred);
+  webViewMissing_.setColour(juce::Label::textColourId, juce::Colour(0xff222222));
+  webViewDownload_.setButtonText("Download WebView2 Runtime");
+  webViewDownload_.setURL(juce::URL("https://developer.microsoft.com/microsoft-edge/webview2/"));
+  webViewDownload_.setFont(juce::Font(juce::FontOptions(17.0f)), false);
+  webViewDownload_.setColour(juce::HyperlinkButton::textColourId, juce::Colour(0xff1555ef));
+  addAndMakeVisible(webViewMissing_);
+  addAndMakeVisible(webViewDownload_);
+}
+
+void NovoxEditor::emit(const juce::Identifier& event, const juce::var& value) {
+  if (browser_) browser_->emitEventIfBrowserIsVisible(event, value);
 }
 
 NovoxEditor::~NovoxEditor() {
@@ -328,18 +392,22 @@ NovoxEditor::~NovoxEditor() {
 void NovoxEditor::paint(juce::Graphics& g) { g.fillAll(juce::Colour(0xffe8e8e8)); }
 
 void NovoxEditor::resized() {
-  browser_.setBounds(getLocalBounds());
+  if (browser_) browser_->setBounds(getLocalBounds());
+  auto message = getLocalBounds().withSizeKeepingCentre(juce::jmin(560, getWidth() - 40), 170);
+  webViewMissing_.setBounds(message.removeFromTop(130));
+  webViewDownload_.setBounds(message.withSizeKeepingCentre(300, 32));
   proc_.editorSize = {getWidth(),getHeight()};
 }
 
 void NovoxEditor::timerCallback() {
+  if (!browser_) return;
 #if JUCE_MAC
   if (!regionDrop_) {
     juce::Component::SafePointer<NovoxEditor> safe(this);
-    regionDrop_=installNovoxRegionDrop(browser_,[safe](juce::String path) {
+    regionDrop_=installNovoxRegionDrop(*browser_,[safe](juce::String path) {
       if(safe) safe->filesDropped({path},0,0);
     },[safe](juce::String error) {
-      if(safe) safe->browser_.emitEventIfBrowserIsVisible("audioFileDrop",error);
+      if(safe) safe->emit("audioFileDrop",error);
     });
   }
 #endif
@@ -378,40 +446,43 @@ void NovoxEditor::timerCallback() {
   }
   static const juce::String hostName = juce::PluginHostType().getHostDescription();
   o->setProperty("hostName", hostName);
+  o->setProperty("platform", NovoxPlatform::name());
+  static const juce::var imports = importTypes();
+  o->setProperty("importTypes", imports);
   auto mic=microphone_.status();
   mic.getDynamicObject()->setProperty("pending",microphonePending_);
   if(microphoneError_.isNotEmpty()) mic.getDynamicObject()->setProperty("error",microphoneError_);
   o->setProperty("microphone",mic);
-  browser_.emitEventIfBrowserIsVisible("status", juce::var(o));
+  emit("status", juce::var(o));
 }
 
 bool NovoxEditor::isInterestedInFileDrag(const juce::StringArray& files) {
   if (files.size() != 1) return false;
-  return juce::File(files[0]).hasFileExtension("wav;mp3;aif;aiff;m4a;flac;ogg;mid;midi;xml;musicxml;mxl");
+  return juce::File(files[0]).hasFileExtension(AudioImport::extensions().joinIntoString(";") + ";" + scoreExtensions.joinIntoString(";"));
 }
 void NovoxEditor::filesDropped(const juce::StringArray& files, int, int) {
   if (!isInterestedInFileDrag(files)) {
-    browser_.emitEventIfBrowserIsVisible("audioFileDrop","Drop one audio or MIDI file at a time");return;
+    emit("audioFileDrop","Drop one audio or MIDI file at a time");return;
   }
   if(static_cast<bool>(microphone_.status()["recording"])) {
-    browser_.emitEventIfBrowserIsVisible("audioFileDrop","Stop singing recording before importing a file");return;
+    emit("audioFileDrop","Stop singing recording before importing a file");return;
   }
   juce::File file(files[0]);
   if (file.getSize() > 64 * 1024 * 1024) {
-    browser_.emitEventIfBrowserIsVisible("audioFileDrop", "File is larger than 64 MB"); return;
+    emit("audioFileDrop", "File is larger than 64 MB"); return;
   }
   if (!file.existsAsFile() || file.getSize()<=0) {
-    browser_.emitEventIfBrowserIsVisible("audioFileDrop","The dragged region did not provide a readable file. Export it as MIDI or audio, then drop that file.");return;
+    emit("audioFileDrop","The dragged region did not provide a readable file. Export it as MIDI or audio, then drop that file.");return;
   }
-  if(file.hasFileExtension("mid;midi;xml;musicxml;mxl")) {
+  if(file.hasFileExtension(scoreExtensions.joinIntoString(";"))) {
     juce::MemoryBlock data;
-    if (!file.loadFileAsData(data)) {browser_.emitEventIfBrowserIsVisible("audioFileDrop","Could not read the dropped file");return;}
+    if (!file.loadFileAsData(data)) {emit("audioFileDrop","Could not read the dropped file");return;}
     auto* o=new juce::DynamicObject();o->setProperty("name",file.getFileName());
     o->setProperty("base64",juce::Base64::toBase64(data.getData(),data.getSize()));
-    browser_.emitEventIfBrowserIsVisible("scoreFileDrop",juce::var(o));return;
+    emit("scoreFileDrop",juce::var(o));return;
   }
-  if (!file.loadFileAsData(pendingAudio_)) {browser_.emitEventIfBrowserIsVisible("audioFileDrop","Could not read the dropped recording");return;}
+  if (!file.loadFileAsData(pendingAudio_)) {emit("audioFileDrop","Could not read the dropped recording");return;}
   pendingName_ = file.getFileName();
   auto* o = new juce::DynamicObject(); o->setProperty("name", pendingName_);
-  browser_.emitEventIfBrowserIsVisible("audioFileDrop", juce::var(o));
+  emit("audioFileDrop", juce::var(o));
 }

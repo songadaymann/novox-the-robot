@@ -5,6 +5,7 @@ import { labelNotes, lyricsFromNotes, pinnedLyric } from "./lyric-text.js";
 import { applyNoteLyrics } from "./note-lyrics.js";
 import { createMelodyClipboard, parseMelodyClipboard, melodyPasteConflicts, applyMelodyPaste } from "./melody-clipboard.js";
 import { createLiveRangesCache, importSpan, isStarterSong, mergeImport, originalSegments, songTranscriptions } from "./song-merge.js";
+import { dawNames, importAccept, importRoute, isBrowserKey, keyNames, platformOf, platformText, playheadNotice, singingMessage, spaceToWebView } from "./platform.js";
 // Novox The Robot plugin editor. Plain ES module, no dependencies.
 //
 // Sections:
@@ -971,6 +972,24 @@ const mmc = { works: false, offset: 0, rate: 0, loaded: false, pending: null, qu
   intent: null, shown: null, located: null, hinted: false, blocksAt: 0 };
 const inDaw = () => !!(S.status.daw || S.status.host);
 const noMmc = () => /garageband/i.test(S.status.hostName || "") || S.status.mmc?.port === false;
+// Hints that show once per editor session.
+const hinted = new Set();
+function hintOnce(key, state, line) {
+  if (hinted.has(key)) return;
+  hinted.add(key);
+  flash(state, line, 6000);
+}
+// Space for the DAW as a key press (hostSpace). Where the editor cannot hand it to the DAW's
+// window (hostSpace says false: no window to hand it to, or a platform without a way), the LCD
+// says once how to reach the DAW, and from then on the page stops handing Space over
+// (spaceToPage). A Mac's web view still passes a Space nothing in the page takes on to the DAW;
+// WebView2 on Windows does not, so there the key does nothing (spaceToWebView, platform.js).
+let spaceToPage = false;
+async function hostSpaceKey() {
+  if (await B.hostSpace?.()) return;
+  spaceToPage = true;
+  hintOnce("space", "SPACE", "Click your DAW to use Space");
+}
 // Whether the DAW is calling the plugin now.
 const hostLive = () => performance.now() - mmc.blocksAt < 400;
 function mmcSave(works) {
@@ -981,7 +1000,8 @@ function mmcSave(works) {
 function mmcHint(state, line) { flash(state, line, 8000, MMC_HINT); }
 // One locate at a time: a click while one is out waits, and only the latest waiting click goes.
 function requestLocate(beat) {
-  if (noMmc()) { flash("PLAYHEAD", "GarageBand's playhead can't be moved from a plugin"); return; }
+  const notice = playheadNotice(S.status);
+  if (notice) { if (notice.once) hintOnce("playhead", "PLAYHEAD", notice.line); else flash("PLAYHEAD", notice.line); return; }
   if (mmc.pending) { mmc.queued = beat; return; }
   locateHost(beat);
 }
@@ -1007,14 +1027,14 @@ function settleLocate() {
   if (next !== null) locateHost(next);
 }
 function hostPlayStop() {
-  if (!mmc.works || noMmc()) { B.hostSpace?.(); return; }
+  if (!mmc.works || noMmc()) { hostSpaceKey(); return; }
   const now = performance.now();
   // Toggle from what was asked a moment ago, not a status that has not caught up.
   const playing = mmc.intent && now - mmc.intent.at < 600 ? mmc.intent.playing : S.status.playing && hostLive();
   mmc.intent = { playing: !playing, at: now };
   const st = S.status;
   B.hostTransport?.(playing ? "stop" : "play").then((sent) => {
-    if (!sent) { B.hostSpace?.(); return; }
+    if (!sent) { hostSpaceKey(); return; }
     if (playing) { mmc.stop = { at: performance.now(), beats: st.beats }; mmc.start = null; }
     else { mmc.start = { at: performance.now(), blocks: st.blocks }; mmc.stop = null; }
   });
@@ -1023,7 +1043,7 @@ function hostPlayStop() {
 // again as the key press.
 function mmcFailed(state, line, { space = false } = {}) {
   mmcSave(false);
-  if (space) B.hostSpace?.();
+  if (space) hostSpaceKey();
   mmcHint(state, line);
 }
 function checkMmc(st, prev) {
@@ -1281,8 +1301,11 @@ document.addEventListener("keydown", (e) => {
   if (mod && (k === "d" || k === "D")) { e.preventDefault(); duplicateSelection(); return; }
   if (k === "Escape") { S.sel.clear(); S.hotPitch = null; refreshInfo(); dirty(); return; }
   // Space plays and stops: our transport, or in a DAW its transport (over MMC once the DAW is known
-  // to listen, else as the key press the native side hands it).
-  if (k === " " && !mod) { e.preventDefault(); if (!inDaw()) togglePlay(); else if (!e.repeat) hostPlayStop(); return; }
+  // to listen, else as the key press the native side hands it, unless that failed: spaceToPage).
+  if (k === " " && !mod) {
+    if (inDaw() && spaceToPage && (!mmc.works || noMmc())) { if (!spaceToWebView(platformOf(S.status), e.target)) e.preventDefault(); return; }
+    e.preventDefault(); if (!inDaw()) togglePlay(); else if (!e.repeat) hostPlayStop(); return;
+  }
   if ((k === "Delete" || k === "Backspace") && S.sel.size) {
     e.preventDefault();
     checkpoint();
@@ -1340,7 +1363,7 @@ function refreshInfo() {
   if (id == null && S.sel.size === 1) id = [...S.sel][0];
   const n = id != null ? noteById(id) : null;
   if (!n) {
-    if (S.sel.size > 1) { el.innerHTML = `<b>${S.sel.size} notes</b> selected · arrows nudge · ⌫ deletes · ⌘D duplicates`; return; }
+    if (S.sel.size > 1) { el.innerHTML = keyNames(`<b>${S.sel.size} notes</b> selected · arrows nudge · ⌫ deletes · ⌘D duplicates`, platformOf(S.status)); return; }
     el.textContent = S.song.notes.length
       ? "Drag to draw · shift-drag selects · double-click a note to enter lyrics"
       : "Draw some notes, import a file, or arm the keyboard icon and play your keyboard.";
@@ -1374,8 +1397,13 @@ function refreshTexts() {
 }
 
 // ---- LCD
-// detail: the LCD tooltip while the message shows (e.g. every warning of an import).
-function flash(state, line = "", ms = 2200, detail = "") { S.flash = { state, line, detail, until: performance.now() + ms }; refreshLcd(); }
+// detail: the LCD tooltip while the message shows (e.g. every warning of an import). Shortcuts
+// are written as on a Mac ("⌘Z undoes") and named as this platform names them.
+function flash(state, line = "", ms = 2200, detail = "") {
+  const platform = platformOf(S.status);
+  S.flash = { state, line: keyNames(line, platform), detail: keyNames(detail, platform), until: performance.now() + ms };
+  refreshLcd();
+}
 // ---- is the audio heard up to date with the edits?
 // status.renderedVersion is the song version the audio being played was rendered from. A render
 // follows an edit within about a second; once the audio has been behind for STALE_MS the LCD says
@@ -1459,7 +1487,7 @@ function refreshButtons() {
   els.capture.setAttribute("aria-pressed", !!st.capture);
   const help = $("captureHelp");
   help.hidden = !st.capture;
-  help.textContent = st.host ? "Start playback in Logic, then play your MIDI keyboard to add notes." : "Press Play, then play your MIDI keyboard to add notes.";
+  help.textContent = st.host ? dawNames("Start playback in Logic, then play your MIDI keyboard to add notes.", platformOf(st)) : "Press Play, then play your MIDI keyboard to add notes.";
   els.play.classList.toggle("on", !!st.playing);
   els.playIco.innerHTML = st.playing ? "&#9632;" : "&#9654;";
   els.playLbl.textContent = st.playing ? "Stop" : "Play";
@@ -1780,7 +1808,9 @@ function importStatus(take = false) {
 async function importFileObj(file) {
   if (!file) return;
   if (micState.recording || micState.pending) {flash("RECORDING", "Stop singing recording before importing a file");return;}
-  if (/\.(wav|mp3|aif|aiff|m4a|flac|ogg)$/i.test(file.name)) return audioImport.open(file, S.song.voice, detailedNotes.checked, importStatus());
+  const route = importRoute(file.name, S.status);
+  if (route.kind === "refuse") { flash("CAN’T IMPORT", route.line, 4000); return; }
+  if (route.kind === "audio") return audioImport.open(file, S.song.voice, detailedNotes.checked, importStatus());
   flash("IMPORTING…", file.name);
   let txt = "";
   try { txt = await B.importFile(toBase64(new Uint8Array(await file.arrayBuffer())), S.song.lyrics); } catch (e) { console.warn(e); }
@@ -1818,12 +1848,33 @@ window.addEventListener("drop", (e) => {
   els.app.classList.remove("dragging");
   const f = e.dataTransfer?.files?.[0];
   if (f) importFileObj(f);
-  else if(B.readNativeDrop) B.readNativeDrop();
+  // A drop without a file: a Mac reads Logic's region drag natively (MacRegionDrop.mm).
+  else if(B.readNativeDrop && platformOf(S.status) === "mac") B.readNativeDrop();
   else flash("CAN’T IMPORT", "This region did not provide an audio or MIDI file");
 });
 
 // ===========================================================================
 // 8. status + boot
+// The platform's names and files (platform.js), once the status says which platform it is: the
+// file picker's types, and away from the Mac the page's shortcut names and DAW wording.
+function applyPlatform(st) {
+  const platform = platformOf(st);
+  els.file.accept = importAccept(st);
+  if (platform === "mac") return;
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (/^(TEXTAREA|SCRIPT|STYLE)$/.test(n.parentNode?.nodeName) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) });
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const text = platformText(n.nodeValue, platform);
+    if (text !== n.nodeValue) n.nodeValue = text;
+  }
+  for (const el of document.querySelectorAll("[title]")) el.title = platformText(el.title, platform);
+}
+// A web view's own browser keys (reload, which would lose Undo; print; find; page zoom) and its
+// context menu do nothing useful here: WebView2 on Windows has them. Ctrl + scroll zooms the roll
+// (onWheel) and nothing else; text fields keep their Cut/Copy/Paste menu.
+window.addEventListener("keydown", (e) => { if (isBrowserKey(e, platformOf(S.status))) e.preventDefault(); }, true);
+window.addEventListener("wheel", (e) => { if (e.ctrlKey && platformOf(S.status) !== "mac") e.preventDefault(); }, { capture: true, passive: false });
+window.addEventListener("contextmenu", (e) => { if (platformOf(S.status) !== "mac" && !isTyping(e.target)) e.preventDefault(); });
 function onStatus(s) {
   if (s.microphone) updateMicrophone(s.microphone);
   const prev = S.status;
@@ -1833,6 +1884,7 @@ function onStatus(s) {
   if(prev.rendering && !st.rendering && phraseMode==="robot" && $("phraseLoop").checked) setTimeout(()=>hearPhrase(false),0);
   if (st.beats == null || !Number.isFinite(+st.beats)) st.beats = 0;
   S.status = st;
+  if (st.platform !== prev.platform) applyPlatform(st);
   if (st.daw || st.host) checkMmc(st, prev);
   trackStale(st);
   if (+st.bpm > 0 && Math.abs(st.bpm - S.bpm) > 1e-3) {
@@ -1895,7 +1947,7 @@ async function boot() {
   fetchPlan();
 }
 
-window.__novox = { S, H }; // for debugging from the console
+window.__novox = { S, H }; // for debugging from the console, and for NovoxPluginTests --webview-smoke
 new ResizeObserver(measure).observe(els.gridwrap);
 window.addEventListener("resize", measure);
 buildSliders();
@@ -1964,8 +2016,9 @@ timelineCanvas.addEventListener("keydown",e=>{
 });
 
 // Singing capture uses native input in both standalone and plugin modes.
-let micState = {recording:false,pending:false}, micStopping=false, lastMicError="";
+let micState = {recording:false,pending:false}, micStopping=false, lastMicError="", micPeak=0;
 function updateMicrophone(state) {
+  if(!state.recording) micPeak=0; else micPeak=Math.max(micPeak,+state.level || 0);
   micState=state;
   const button=$("singCapture"),active=state.recording || state.pending;
   button.classList.toggle("on",active);button.setAttribute("aria-pressed",String(active));
@@ -1974,7 +2027,7 @@ function updateMicrophone(state) {
   $("singHelp").hidden=!active;
   $("singCancel").disabled=!!state.pending;
   $("singLevel").value=state.level || 0;
-  $("singMessage").textContent=state.pending ? "Allow microphone access to record your singing." : `Sing, then click the singing icon to stop and convert · ${Math.floor(state.seconds || 0)}s / 60s`;
+  $("singMessage").textContent=singingMessage(state,micPeak,platformOf(S.status));
   if(state.error && state.error!==lastMicError) {takeStatus=null;flash("CAN’T RECORD",state.error);}
   lastMicError=state.error || "";
   if(state.full && !micStopping) stopSinging();

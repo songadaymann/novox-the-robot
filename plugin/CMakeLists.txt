@@ -4,15 +4,30 @@
 
 include(FetchContent)
 
+# The plugin cannot load a pronouncing dictionary at run time: the engine must have one compiled in.
+if(NOT NOVOX_EMBED_DICT)
+  message(FATAL_ERROR "The plugin needs the embedded CMU dictionary: configure with NOVOX_EMBED_DICT ON.")
+endif()
+
 # Development builds archive and install every bundle into ~/Library after each build. A release
-# build (scripts/package-mac.sh) turns this off: it packages the bundles instead.
-option(NOVOX_INSTALL_AFTER_BUILD "Archive and install plugin bundles into ~/Library after each build" ON)
+# build (scripts/package-mac.sh) turns this off: it packages the bundles instead. On Windows it is
+# off unless asked for: JUCE then copies the VST3 into Common Files\VST3, which needs an
+# administrator.
+set(novox_install_default ON)
+if(WIN32)
+  set(novox_install_default OFF)
+endif()
+option(NOVOX_INSTALL_AFTER_BUILD
+  "Install plugin bundles after each build (macOS: archive and install into ~/Library; Windows: copy the VST3 into Common Files)"
+  ${novox_install_default})
 
 # macOS delivery goes through our dated archive and transactional installer.
-# Other platforms retain JUCE's existing copy behavior.
+# Windows follows NOVOX_INSTALL_AFTER_BUILD; other platforms retain JUCE's existing copy behavior.
 set(novox_copy_plugin_after_build TRUE)
 if(APPLE)
   set(novox_copy_plugin_after_build FALSE)
+elseif(WIN32)
+  set(novox_copy_plugin_after_build ${NOVOX_INSTALL_AFTER_BUILD})
 endif()
 FetchContent_Declare(juce
   GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
@@ -20,11 +35,43 @@ FetchContent_Declare(juce
   GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(juce)
 
+# Windows: JUCE links the WebView2 loader statically from Microsoft's Microsoft.Web.WebView2 NuGet
+# package. Its FindWebView2.cmake looks for a *Microsoft.Web.WebView2* folder inside
+# JUCE_WEBVIEW2_PACKAGE_LOCATION, so the version JUCE 8.0.15 suggests is fetched into the build tree
+# (no NuGet setup needed), pinned by the package's SHA-512 from nuget.org's catalog. Pass
+# -DJUCE_WEBVIEW2_PACKAGE_LOCATION=<folder> to use a package you already have instead. Must come
+# before the JUCE targets: they look the package up when they are created.
+if(WIN32 AND NOT JUCE_WEBVIEW2_PACKAGE_LOCATION)
+  set(novox_webview2_version 1.0.3485.44)
+  if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+  endif()
+  FetchContent_Declare(webview2
+    URL https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/${novox_webview2_version}/microsoft.web.webview2.${novox_webview2_version}.nupkg
+    URL_HASH SHA512=d01a59afdbda1da11d640db98934ffed12c0f813551b75f97e052673d12e3238f88f29f4c24ac56a9313f5cd3f022a1e8d40e103a3798aa4d42d1322ddb342de
+    DOWNLOAD_NAME microsoft.web.webview2.${novox_webview2_version}.zip  # a .nupkg is a zip
+    SOURCE_DIR "${FETCHCONTENT_BASE_DIR}/nuget/Microsoft.Web.WebView2.${novox_webview2_version}")
+  FetchContent_MakeAvailable(webview2)  # no CMakeLists.txt inside: this only downloads and unpacks
+  get_filename_component(JUCE_WEBVIEW2_PACKAGE_LOCATION "${webview2_SOURCE_DIR}" DIRECTORY)
+endif()
+
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(WHISPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(WHISPER_CURL OFF CACHE BOOL "" FORCE)
 set(GGML_METAL_EMBED_LIBRARY ON CACHE BOOL "" FORCE)
+if(WIN32)
+  # Windows builds run on other people's PCs: ggml's AVX2 baseline instead of the build machine's
+  # own CPU (a CI runner may have AVX-512), and ggml's own thread pool instead of OpenMP, which
+  # would add vcomp140.dll. ggml turns the baseline's instruction sets off by default when
+  # SOURCE_DATE_EPOCH is set or a cache predates GGML_NATIVE OFF, so they are set too (with MSVC,
+  # AVX2 brings FMA and F16C). The Mac settings stay as they are (scripts/package-mac.sh).
+  set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+  set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+  foreach(instructions GGML_SSE42 GGML_AVX GGML_AVX2 GGML_BMI2)
+    set(${instructions} ON CACHE BOOL "" FORCE)
+  endforeach()
+endif()
 # The patch stops whisper.cpp aborting (and taking the DAW with it) when a DTW timestamp window
 # is under 160 ms long; upstream still asserts there through v1.9.5. See the patch's header.
 FetchContent_Declare(whisper
@@ -131,6 +178,7 @@ juce_add_binary_data(NovoxUiData SOURCES
   ui/pitch-correction.js
   ui/note-shaping.js
   ui/song-merge.js
+  ui/platform.js
   ui/backend.js
   ui/style.css
   ${CMAKE_CURRENT_BINARY_DIR}/ui/juce.js
@@ -164,8 +212,9 @@ target_link_libraries(NovoxTheRobot
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags)
 
-# Headless tests: host the processor with a fake playhead.
-juce_add_console_app(NovoxPluginTests PRODUCT_NAME "NovoxPluginTests")
+# Headless tests: host the processor with a fake playhead. They build the editor too, so on
+# Windows they link WebView2 like the plugin.
+juce_add_console_app(NovoxPluginTests PRODUCT_NAME "NovoxPluginTests" NEEDS_WEBVIEW2 TRUE)
 target_sources(NovoxPluginTests PRIVATE
   Tests/PluginTests.cpp
   Source/PluginProcessor.cpp
@@ -183,6 +232,14 @@ target_include_directories(NovoxTheRobot PRIVATE ${CMAKE_SOURCE_DIR}/engine/src)
 target_include_directories(NovoxPluginTests PRIVATE ${CMAKE_SOURCE_DIR}/engine/src)
 target_link_libraries(NovoxPluginTests PRIVATE
   NovoxUiData novox_static whisper juce::juce_cryptography juce::juce_audio_utils juce::juce_gui_extra juce::juce_recommended_config_flags)
+
+# Windows: compile JUCE's WebView2 backend into every target that builds the editor
+# (PluginEditor.cpp). NEEDS_WEBVIEW2 only links the loader; without this the editor's resource
+# provider does not exist there. PUBLIC on the plugin, so its VST3 and app wrappers agree.
+if(WIN32)
+  target_compile_definitions(NovoxTheRobot PUBLIC JUCE_USE_WIN_WEBVIEW2_WITH_STATIC_LINKING=1)
+  target_compile_definitions(NovoxPluginTests PRIVATE JUCE_USE_WIN_WEBVIEW2_WITH_STATIC_LINKING=1)
+endif()
 
 if(APPLE)
   target_compile_definitions(NovoxPluginTests PRIVATE NOVOX_DROP_TESTS=1)
@@ -238,6 +295,11 @@ if(APPLE)
   foreach(target NovoxTheRobot NewVirtualSingerCompat NovoxPluginTests)
     target_compile_definitions(${target} PRIVATE NOVOX_DROP_HANDLER=${target}DropHandler)
     target_sources(${target} PRIVATE Source/MacShortcuts.mm Source/MacRegionDrop.mm)
+  endforeach()
+elseif(WIN32)
+  # Space for the host's transport (forwardNovoxHostSpace), as MacShortcuts.mm on a Mac.
+  foreach(target NovoxTheRobot NovoxPluginTests)
+    target_sources(${target} PRIVATE Source/WinShortcuts.cpp)
   endforeach()
 endif()
 

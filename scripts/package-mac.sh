@@ -35,8 +35,10 @@ echo "== Novox The Robot $LABEL ($VERSION)"
 EXTRA=()
 [[ -n "${NOVOX_JUCE_SOURCE:-}" ]] && EXTRA+=("-DFETCHCONTENT_SOURCE_DIR_JUCE=$NOVOX_JUCE_SOURCE")
 [[ -n "${NOVOX_WHISPER_SOURCE:-}" ]] && EXTRA+=("-DFETCHCONTENT_SOURCE_DIR_WHISPER=$NOVOX_WHISPER_SOURCE")
+# The SDK is named every time: a cache keeps the one it was first configured with, which a
+# Command Line Tools update removes (JUCE's juceaide then can't find TargetConditionals.h).
 cmake -S "$ROOT" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release -DNOVOX_BUILD_PLUGIN=ON \
-  -DNOVOX_INSTALL_AFTER_BUILD=OFF \
+  -DNOVOX_INSTALL_AFTER_BUILD=OFF -DCMAKE_OSX_SYSROOT="$(xcrun --sdk macosx --show-sdk-path)" \
   -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET="$MIN_MACOS" \
   -DGGML_NATIVE=OFF -DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16 ${EXTRA[@]+"${EXTRA[@]}"} >/dev/null
 cmake --build "$BUILD" --target NovoxTheRobot_AU NovoxTheRobot_VST3 NovoxTheRobot_Standalone -j 8

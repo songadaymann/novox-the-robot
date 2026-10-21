@@ -177,6 +177,10 @@ class NovoxProcessor : public juce::AudioProcessor, private juce::Timer {
   void timerCallback() override;
   void requestRender();
   void renderWorker();
+  // Offline (isNonRealtime) only: blocks until the render matches the song, sample rate and tempo,
+  // a render fails, or kOfflineRenderWaitMs passes.
+  void waitForRender(double sampleRate, double bpm);
+  static constexpr double kOfflineRenderWaitMs = 120000;
 
   // song: a copy of the song's render (Compare > Robot), stale once the song changes.
   struct Audition { std::vector<float> samples; double rate = 0, position = 0; bool notePreview = false; double begin = 0, end = 0; bool loop = false; bool song = false; };
@@ -192,11 +196,17 @@ class NovoxProcessor : public juce::AudioProcessor, private juce::Timer {
   // Unlike songVersion_, only changes when the score can sound different. A metadata edit
   // must neither cancel a render in progress nor make its completed audio appear stale.
   std::atomic<int> audioRevision_{0};
+  // Edits to what the project saves (song, tempo, MMC), not loads; the timer tells the host.
+  std::atomic<int> stateEdits_{0};
+  int stateEditsNotified_ = 0;  // message thread
+  double stateNotifiedAt_ = 0;
+  static constexpr double kStateNotifyMs = 500;
 
   // Rendered audio handed to the audio thread.
   juce::SpinLock renderedLock_;
   std::shared_ptr<const Rendered> rendered_;
   std::vector<std::shared_ptr<const Rendered>> retired_;  // freed on the message thread
+  std::mutex retiredMutex_;
 
   // Background renderer.
   std::unique_ptr<juce::Thread> worker_;

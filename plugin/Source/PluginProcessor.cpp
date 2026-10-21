@@ -301,6 +301,11 @@ void NovoxProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
 
   if (!playing) { cursorValid_ = false; return; }
 
+  // An offline bounce or export (a DAW's offline bounce, MuseScore's audio export) doesn't wait for
+  // the render of a song it has just loaded or changed, so the file would be silent or stale where
+  // the song sings: wait for it here. Blocking is fine off the real-time path.
+  if (isNonRealtime()) waitForRender(sr, bpm);
+
   std::shared_ptr<const Rendered> r;
   {
     const juce::SpinLock::ScopedTryLockType lock(renderedLock_);
@@ -359,6 +364,7 @@ void NovoxProcessor::timerCallback() {
       add(start2, size2);
       ++songVersion_;
       ++audioRevision_;
+      ++stateEdits_;
     }
     captureFifo_.finishedRead(size1 + size2);
     requestRender();
@@ -395,9 +401,47 @@ void NovoxProcessor::timerCallback() {
   }
 
   // Free renders the audio thread no longer uses.
-  retired_.erase(std::remove_if(retired_.begin(), retired_.end(),
-                                [](const std::shared_ptr<const Rendered>& p) { return p.use_count() == 1; }),
-                 retired_.end());
+  {
+    const std::lock_guard<std::mutex> lock(retiredMutex_);
+    retired_.erase(std::remove_if(retired_.begin(), retired_.end(),
+                                  [](const std::shared_ptr<const Rendered>& p) { return p.use_count() == 1; }),
+                   retired_.end());
+  }
+
+  // Edits are part of the host's project: tell it, at most twice a second, so it saves them. A VST3
+  // host is marked dirty (MuseScore reads the state again only then, or when the editor closes);
+  // an AU host gets its ClassInfo change. A state the host loads is not an edit.
+  if (const int edits = stateEdits_.load(); edits != stateEditsNotified_) {
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    if (now - stateNotifiedAt_ >= kStateNotifyMs) {
+      stateEditsNotified_ = edits;
+      stateNotifiedAt_ = now;
+      updateHostDisplay(ChangeDetails().withNonParameterStateChanged(true));
+    }
+  }
+}
+
+void NovoxProcessor::waitForRender(double sampleRate, double bpm) {
+  const double until = juce::Time::getMillisecondCounterHiRes() + kOfflineRenderWaitMs;
+  bool asked = false;
+  for (;;) {
+    {
+      const juce::SpinLock::ScopedLockType lock(renderedLock_);
+      if (rendered_ && rendered_->audioRevision == audioRevision_.load() &&
+          std::abs(rendered_->sampleRate - sampleRate) <= 0.5 && std::abs(rendered_->bpm - bpm) <= 0.005)
+        return;
+    }
+    if (juce::Time::getMillisecondCounterHiRes() > until) return;
+    if (!rendering_.load()) {
+      if (asked) {  // the render asked for finished without this song: an error ends the wait
+        std::lock_guard<std::mutex> lock(errorMutex_);
+        if (renderError_.isNotEmpty()) return;
+      }
+      requestRender();
+      asked = true;
+    }
+    juce::Thread::sleep(2);
+  }
 }
 
 void NovoxProcessor::requestRender() {
@@ -470,10 +514,12 @@ void NovoxProcessor::renderWorker() {
         old = std::move(rendered_);
         rendered_ = r;
       }
-      // Hand the old render to the message thread to free (never on the audio thread).
-      juce::MessageManager::callAsync([this, old]() mutable {
-        if (old) retired_.push_back(std::move(old));
-      });
+      // Hand the old render to the message thread to free (never on the audio thread): the timer
+      // drains this list, and it stops with the processor, so nothing queued outlives it.
+      if (old) {
+        const std::lock_guard<std::mutex> lock(retiredMutex_);
+        retired_.push_back(std::move(old));
+      }
     }
     rendering_ = false;
   }
@@ -493,6 +539,7 @@ void NovoxProcessor::setSongJson(const juce::String& json) {
     // pane is a readable mirror; changing it or import provenance requires no new audio.
     // The fixed tempo makes this comparison independent of the current host transport.
     audibleChange = incoming.toScoreJson(120) != song_.toScoreJson(120);
+    if (audibleChange || incoming.toJson() != song_.toJson()) ++stateEdits_;
     song_ = std::move(incoming);
     ++songVersion_;
     if (audibleChange) ++audioRevision_;
@@ -625,7 +672,8 @@ void NovoxProcessor::setPreviewCursor(double beats) {
 }
 
 void NovoxProcessor::setPreviewTempo(double bpm) {
-  previewBpm_ = juce::jlimit(20.0, 400.0, bpm);
+  const double tempo = juce::jlimit(20.0, 400.0, bpm);
+  if (std::abs(tempo - previewBpm_.exchange(tempo)) > 1e-9) ++stateEdits_;
   if (!hostTransport_.load()) requestRender();
 }
 
@@ -679,9 +727,12 @@ juce::var NovoxProcessor::getSource(const juce::String& id) const {
 // its recordings to the ones this instance holds: an open editor's Undo can bring back the song
 // from before the load, and its recordings must still play and save.
 void NovoxProcessor::setMmcState(const MmcState& s) {
+  const auto before = mmcState();
   mmcWorks_ = s.works;
   mmcOffset_ = std::isfinite(s.offset) ? juce::jlimit(-7200.0, 7200.0, s.offset) : 0.0;
   mmcRate_ = std::isfinite(s.rate) && s.rate >= 0 && s.rate <= 60 ? s.rate : 0.0;
+  const auto after = mmcState();
+  if (after.works != before.works || after.offset != before.offset || after.rate != before.rate) ++stateEdits_;
 }
 NovoxProcessor::MmcState NovoxProcessor::mmcState() const { return {mmcWorks_.load(), mmcOffset_.load(), mmcRate_.load()}; }
 

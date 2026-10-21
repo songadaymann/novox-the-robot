@@ -1264,3 +1264,24 @@ Signing/notarization and clean-user installation remain separate tasks.
 **Next approval:** committing/pushing these changes and remote validation need
 authorization; publishing needs separate approval. Rerunning the original beta
 release workflow would use its old tagged source, not this local repair.
+
+## Windows port and notation apps (2026-10-21)
+
+Branch `windows-and-notation`: the earlier CI repair, the Windows port, MuseScore/Dorico import
+and playback, and these fixes found while testing in MuseScore 4.7.5:
+
+- **Quit crash:** macOS builds compile with `-fc++-static-destructors=thread-local` when the
+  compiler has it (root `CMakeLists.txt`); see docs/HOSTS.md.
+- **Render handoff:** the old render goes to `retired_` under `retiredMutex_` instead of a
+  `callAsync` that could run after the processor was deleted.
+- **Offline bounces** (`isNonRealtime()`) wait in `processBlock` for the render of the current song,
+  tempo and sample rate (`waitForRender`, up to 2 minutes, or until a render fails).
+- **Edits mark the host project changed:** `stateEdits_` counts song, tempo and MMC edits (not
+  state loads), and the timer calls `updateHostDisplay(nonParameterStateChanged)` at most twice a
+  second (VST3 `setDirty`, AU ClassInfo). MuseScore reads a plugin's state again only then.
+
+Checks on this Mac: ctest, 376 plugin checks, 33 editor checks, 11 UI test files and the Python
+tests pass. In MuseScore 4.7.5's own export the VST3 sings in time across a tempo change, and 30
+exports quit cleanly. Windows itself is checked only by `.github/workflows/plugin-windows.yml`.
+Signing (Windows and Mac) is still open.
+

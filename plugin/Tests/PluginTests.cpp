@@ -165,6 +165,62 @@ int chunkAt(const juce::MemoryBlock& data, const char* id, size_t from = 12) {
   return -1;
 }
 
+// An offline bounce or export (MuseScore's audio export, a DAW's offline bounce) plays the song it
+// has just been given, not silence or the old render. Edits tell the host they changed the project
+// (updateHostDisplay: a VST3's dirty flag, an AU's ClassInfo), at most twice a second, and loading
+// a state does not.
+void testOfflineRenderAndEdits(const juce::String& songJson) {
+  struct Listener : juce::AudioProcessorListener {
+    int edits = 0;
+    void audioProcessorParameterChanged(juce::AudioProcessor*, int, float) override {}
+    void audioProcessorChanged(juce::AudioProcessor*, const ChangeDetails& d) override {
+      if (d.nonParameterStateChanged) ++edits;
+    }
+  } listener;
+  NovoxProcessor p;
+  FakePlayHead ph;
+  p.setPlayHead(&ph);
+  p.setRateAndBufferSizeDetails(48000, 512);
+  p.prepareToPlay(48000, 512);
+  waitForRender(p);
+  p.addListener(&listener);
+  pump(0.6);
+  CHECK(listener.edits == 0);  // a new instance has nothing to save
+
+  ph.playing = true;
+  p.setNonRealtime(true);
+  p.setSongJson(songJson);
+  const auto offline = play(p, ph, 0.5, .1);  // straight after the change: it waits for the render
+  p.setNonRealtime(false);
+  waitForRender(p);
+  const auto live = play(p, ph, 0.5, .1);
+  float diff = 0;
+  for (size_t i = 0; i < std::min(offline.size(), live.size()); ++i) diff = std::max(diff, std::fabs(offline[i] - live[i]));
+  CHECK(rms(live) > .001f && offline.size() == live.size() && diff < 1e-5f);
+  ph.playing = false;
+
+  pump(0.6);
+  CHECK(listener.edits == 1);
+  juce::MemoryBlock state;
+  p.getStateInformation(state);
+  p.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+  p.setSongJson(p.getSongJson());  // the page sending back the song it was given
+  pump(0.6);
+  CHECK(listener.edits == 1);
+  p.setPreviewTempo(97);
+  pump(0.1);
+  CHECK(listener.edits == 2);
+  p.setPreviewTempo(98);  // within half a second of the last notice: it waits for the next
+  pump(0.1);
+  CHECK(listener.edits == 2);
+  pump(0.6);
+  CHECK(listener.edits == 3);
+  p.setPreviewTempo(98);
+  pump(0.6);
+  CHECK(listener.edits == 3);
+  p.removeListener(&listener);
+}
+
 void testRenderStateChanges() {
   NovoxProcessor processor;
   processor.setRateAndBufferSizeDetails(48000, 512);
@@ -1218,6 +1274,7 @@ int main(int argc, char** argv) {
     waitForRender(p);  // restore the fixture for the following playback checks
   }
   testRenderStateChanges();
+  testOfflineRenderAndEdits(songJson);
 
   // Edits faster than a render (typing) still bring fresh audio: a render is not cancelled once the
   // audio is a second behind the edits.

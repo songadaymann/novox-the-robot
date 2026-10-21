@@ -18,6 +18,21 @@ if(MSVC)
   add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:/utf-8>")
 endif()
 
+# macOS never unloads a plugin bundle (JUCE registers Objective-C classes in it), so C++ static
+# destructors there only run inside exit(), where they do no good. MuseScore 4 tears its VST3
+# plugins down from its own exit-time destructors, after ours have run: JUCE's bundleExit() and
+# shutdownJuce_GUI() then free juce::bundleRefs, the DeletedAtShutdown list and CoreMIDI observers a
+# second time, and the app aborts on quit (any JUCE VST3 does), while a render may still be reading
+# the engine's tables. Keep statics alive until the process ends; thread_local destructors still
+# run. Like the MSVC block, this comes before every target, JUCE's and whisper.cpp's included.
+if(APPLE)
+  include(CheckCXXCompilerFlag)
+  check_cxx_compiler_flag(-fc++-static-destructors=thread-local NOVOX_KEEP_STATICS)
+  if(NOVOX_KEEP_STATICS)
+    add_compile_options("$<$<COMPILE_LANGUAGE:CXX,OBJCXX>:-fc++-static-destructors=thread-local>")
+  endif()
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)

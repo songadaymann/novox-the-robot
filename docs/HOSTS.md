@@ -9,7 +9,7 @@ checked 2026-10-21.
 | Ableton Live | AU or VST3 | Not tested yet; checklist below |
 | Pro Tools | AAX (optional build) | Not released: builds, never loaded in Pro Tools, unsigned |
 | Windows DAWs | VST3 (64-bit) | Built by CI; not yet tested in a Windows DAW. See [Windows](#windows) |
-| MuseScore Studio 4 | VST3 only | Not tested live: follows its sample clock (headless tests only); checklist below |
+| MuseScore Studio 4 | VST3 only | Sample-clock sync checked in 4.7.5's own audio export (not yet live playback); checklist below |
 | Dorico 5/6 (Pro, Elements, SE) | VST3 only | Not tested live; checklist below |
 
 Releases (`scripts/package-mac.sh`, songaday.studio/plugins) ship the app, the AU (`Nvox` only) and
@@ -307,6 +307,20 @@ beat position without a tempo (perhaps Dorico) is treated like the standalone ap
   are silent: the first preview and the LCD's tooltip say so. A DAW that has not run Novox yet
   (Logic, for a track it isn't playing) gets the same treatment: Play and previews say to start
   its playback.
+- **Checked in MuseScore 4.7.5 itself (2026-10-21), headless:** a `.mscz` whose vocal staff plays
+  the VST3 with a saved song, exported with `mscore -o out.wav` (the project's `audiosettings.json`
+  names the plugin and holds its state as `componentState`; the command line only resolves plugins
+  listed in `known_audio_plugins.json`). The release build sang nothing there; this one sings, and
+  each note of a score with a tempo change (100, then 60) starts within 3 ms of Novox's own render
+  of it, before and after the change. Its export runs in real-time mode (no `kOffline`), sends
+  `kPlaying` and a sample position that counts from 0, and calls the plugin in 4096-sample blocks.
+  In a score whose only instrument is the VST, the export can start before the plugin has loaded:
+  the track then never plays (no `kPlaying`, the position stays at 0). Live playback starts long
+  after loading.
+- **Quitting MuseScore aborted** with a JUCE VST3 loaded (a double free in JUCE's `bundleExit()`:
+  MuseScore unloads plugins from its own exit-time destructors, after the plugin's statics are gone;
+  OB-Xd does the same). macOS builds now keep C++ statics alive to the end (root `CMakeLists.txt`):
+  30 of 30 exports quit cleanly, against 9 aborts in 10 before.
 - MuseScore 4.7 also follows MMC from MIDI inputs and from a VST3's SysEx output. Novox sends MMC
   only on its CoreMIDI port (no plugin MIDI output), and only does so in DAWs. Untested.
 - Its MusicXML export writes ritardando, accelerando and fermatas as text only, so after one of
@@ -333,7 +347,7 @@ beat position without a tempo (perhaps Dorico) is treated like the standalone ap
 - [ ] **MuseScore playback.** Play from the start, from the middle and after a loop; Novox should
       sound in time and stop with MuseScore. View should show "clock: samples". Try MuseScore 4.6
       (no playing flag) if available, a count-in, the playback-speed slider (does
-      `projectTimeSamples` follow it?) and audio export (offline: does Novox render in time?).
+      `projectTimeSamples` follow it?) and audio export from the app.
 - [ ] **Tempo change.** A score that changes tempo mid-way: Novox should stay with MuseScore (and
       Dorico) after the change; rit./fermata are expected to drift.
 - [ ] **Dorico playback** in follow-tempo and fixed-tempo modes, with a tempo change, a repeat and

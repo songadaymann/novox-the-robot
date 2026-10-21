@@ -253,7 +253,7 @@ print(ctypes.string_at(p).decode() if p else json.dumps({"error": lib.novox_last
 if p: lib.novox_free(p)
 lib.novox_destroy(e)
 `, library, JSON.stringify(options)], { input: bytes, encoding: 'utf8' }));
-  const plan = (score) => JSON.parse(execFileSync(cli, ['plan', '/dev/stdin'], { input: JSON.stringify(score), encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }));
+  const plan = (score) => JSON.parse(execFileSync(cli, ['plan', '-'], { input: JSON.stringify(score), encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }));
   // The song as the plugin sends it to the planner (Song::toScoreJson): note lyrics, no line.
   const scoreOf = (notes, bpm, lyrics = null) => ({ tempo: bpm, units: 'beats', voice: 'std', ...(lyrics === null ? {} : { lyrics }),
     notes: notes.map((n) => ({ pitch: n.pitch, start: n.start, dur: n.dur, ...(lyrics === null && n.lyric ? { lyric: n.lyric } : {}) })) });

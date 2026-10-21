@@ -40,9 +40,18 @@ ctest --test-dir build   # engine tests
 ```
 
 The CMU dictionary is compiled into the engine, so the binary and library need no data files
-(`--dict` adds extra entries). MIDI import reads lyric meta events and tempo changes; MusicXML
-import handles ties, melisma extenders, hyphenated syllables and multiple voices (it sings the
-first voice of the first part; choose another part with `--track`).
+(`--dict` adds extra entries). MIDI import reads lyric meta events (hyphenated, MuseScore's
+trailing-space words, or karaoke-style), tempo changes and time signatures. MusicXML import
+(uncompressed `.musicxml`/`.xml`, as MuseScore and Dorico export it; unzip a `.mxl` first) sings
+the first part with lyrics, in the voice that carries them, one syllable per note: ties, melisma
+extenders, hyphenated syllables and elisions (`a‿in` becomes `a~in`), chords (top note),
+transposing parts (concert pitch), and tempo from `<sound tempo>` or metronome marks. Repeats,
+endings, D.C., D.S., To Coda and Fine are played out as MuseScore plays them, with verse N on pass
+N. Choose with `--track`
+(part), `--part-voice`, `--verse`, or `--no-unfold` (as written). A file's own lyrics win over
+`--lyrics`, which fills in only for a file without any. Time 0 is the start of the first measure,
+a pickup included; the parts, tempo map, time signatures and pickup length are in the result's
+`"import"` object.
 
 Scores are JSON (`scores/demo.json`, format documented in `engine/src/score.hpp`):
 
@@ -272,9 +281,47 @@ with it off.
 
 **Other hosts:** [docs/HOSTS.md](docs/HOSTS.md) has the optional Pro Tools build
 (`-DNOVOX_AAX_SDK=bundled` adds an AAX target using the AAX SDK inside JUCE; Pro Tools also needs
-PACE signing), the Ableton Live test checklist, and notes on Logic.
+PACE signing), the Ableton Live test checklist, notes on Logic, and what MuseScore and Dorico send.
 
 The plugin is AGPLv3 (JUCE's open-source license); the engine it links stays MIT.
+
+### Using Novox with MuseScore and Dorico
+
+1. **Export MusicXML** from the notation app: in MuseScore Studio, File › Export › MusicXML; in
+   Dorico, File › Export › MusicXML. Compressed (`.mxl`) and uncompressed (`.musicxml`, `.xml`)
+   both work. Dorico writes one file per flow.
+2. **Import it into Novox:** drop the file on the window or choose it with **Import…**, in the
+   standalone app or in the plugin on a vocal staff. Both apps load the **VST3** (neither hosts AU):
+   in MuseScore choose it in the Mixer's instrument slot of the staff; in Dorico load it as a VST
+   instrument in Play mode and assign the vocal staff to it. Novox sings the first part with lyrics, in the voice that carries
+   them, one syllable per note, so a one-syllable word such as "fire" stays on its note. A file
+   with several parts, voices or verses opens a bar under the top bar to sing another (each choice
+   imports the file again). A file without lyrics sings the Lyrics box.
+   Problems with the file and import warnings show on the LCD; hover it to read them all.
+
+What to expect:
+- **Lyrics come from the file.** No notation app passes lyrics to plugins, so after editing words
+  in the score, export and import again.
+- **MuseScore** gives plugins no beat position or tempo, and runs them only while it plays. Novox
+  follows its playback by time (seconds from the start of the score, at the song's tempo; View
+  shows "clock: samples"). Start and stop playback in MuseScore: Novox's Play and ruler say so,
+  and note previews and Compare are silent while MuseScore is stopped. Edit there, or in the
+  standalone app.
+- **Dorico** sends a beat position, which Novox follows as it does a DAW's. Steinberg staff say
+  it counts that position at the flow's first tempo, and disagree about when it sends a tempo
+  (unverified; see docs/HOSTS.md).
+- **Tempo changes:** a Novox song has one tempo. A score whose tempo changes is placed by time at
+  its first tempo, so it sounds as written and lines up with the notation app's playback clock; the
+  LCD warns that the grid follows the first tempo, and the bars drawn after a change no longer match
+  the score's. In a DAW that sends its own tempo, an imported file keeps its written beats instead,
+  as before. Ritardando, accelerando and fermatas are not in MusicXML (MuseScore writes them as
+  text), so Novox runs ahead of MuseScore's playback after them.
+- **Repeats and verses:** repeats, endings, D.C., D.S., To Coda and Fine are played out as
+  MuseScore plays them, with verse N on the Nth time through; choose a single verse in the import
+  bar. A pickup starts at beat 0, as in the notation app; the grid still draws 4/4 bars from there
+  (the LCD says so for a score in another meter or with a pickup).
+  A MIDI export puts every verse at once; where one verse holds a note another sings, Novox matches
+  syllables to verses by their words and says so, so prefer MusicXML for songs with verses.
 
 ## Layout
 

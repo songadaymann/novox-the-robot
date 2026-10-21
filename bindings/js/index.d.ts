@@ -9,6 +9,36 @@ export interface Score {
   notes: Array<string | { pitch: string | number; dur: number; start?: number; lyric?: string }>;
 }
 
+/** What an imported file holds; beats are quarter notes from time 0 (the start of any pickup). */
+export interface ImportInfo {
+  format: "midi" | "musicxml";
+  part: number;
+  partVoice: string;
+  /** The verse sung throughout, or 0 when verse N is sung on repeat pass N. */
+  verse: number;
+  /** The notes' lyrics are the file's own (the `lyrics` option was not used). */
+  fileLyrics: boolean;
+  repeats: boolean;
+  unfolded: boolean;
+  pickupBeats: number;
+  tempoMap: { beat: number; seconds: number; bpm: number }[];
+  timeSignatures: { beat: number; seconds: number; beats: number; beatType: number }[];
+  parts: {
+    index: number;
+    id: string;
+    name: string;
+    notes: number;
+    lyrics: number;
+    verses: number[];
+    voices: { voice: string; notes: number; lyrics: number }[];
+  }[];
+}
+
+export interface ImportedScore extends Score {
+  import: ImportInfo;
+  importWarnings?: string[];
+}
+
 export interface Plan {
   lead: number;
   length: number;
@@ -35,7 +65,10 @@ export class Singer {
   phonemize(text: string): string;
   voices(): string[];
   addWord(word: string, arpabet: string): void;
-  importFile(bytes: Uint8Array | ArrayBuffer, options?: { lyrics?: string; track?: number; voice?: string }): Score;
+  importFile(
+    bytes: Uint8Array | ArrayBuffer,
+    options?: { lyrics?: string; track?: number; voice?: string; partVoice?: string; verse?: number; unfold?: boolean },
+  ): ImportedScore;
   stream(score: Score | string): Stream;
   toWav(samples: Float32Array, sampleRate?: number): Uint8Array;
   destroy(): void;

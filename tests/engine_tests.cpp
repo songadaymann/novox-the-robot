@@ -131,6 +131,17 @@ void testLyricFlow() {
   CHECK(one.syllables[0].text.empty() && one.syllables[0].phonemes == " | M | ");
   CHECK(one.syllables[1].text == "wanna" && !one.syllables[1].continues);
   CHECK(one.syllables[2].text == "go");
+  // Whole words joined on one note (an elision, "grace~and", as MusicXML imports write it) are each
+  // said as the dictionary has them, both vowels on the note; a joined word it knows stays one.
+  novox::Plan elided = planOf(R"({"tempo": 120, "lyrics": "grace~and a~in wan~na", "notes": ["C4 1", "D4 1", "E4 1"]})");
+  CHECK(elided.warnings.empty());
+  CHECK(elided.syllables.size() == 3);
+  if (elided.syllables.size() == 3) {
+    CHECK(elided.syllables[0].text == "grace~and" && elided.syllables[0].phonemes.find("G R | EY S ") == 0);
+    CHECK(elided.syllables[0].phonemes.find("| N D") != std::string::npos);
+    CHECK(elided.syllables[1].text == "a~in" && elided.syllables[1].phonemes.find(" IH") != std::string::npos);
+    CHECK(elided.syllables[2].text == "wanna");
+  }
 
   // A held note inside a hyphenated word does not end the word: "member" is the
   // tail of re-member on one note, not split again by its own two vowels.
@@ -161,6 +172,7 @@ void testLyricTokenApi() {
   CHECK(tokens("re-mem-ber") == std::vector<std::string>({"re-", "mem-", "ber"}));
   CHECK(tokens("re- _ member") == std::vector<std::string>({"re-", "_", "member"}));
   CHECK(tokens("wanna~ ~ + {R IH M EH M B ER}") == std::vector<std::string>({"wanna", "", "+", "{R IH M EH M B ER}"}));
+  CHECK(tokens("grace~and fire~ wan~na") == std::vector<std::string>({"grace~and", "fire", "wanna"}));
   CHECK(tokens("cat", R"({"cat":"K AE1 T AH0 IY0"})") == std::vector<std::string>({"cat-", "-", ""}));
   CHECK(tokens("cat") == std::vector<std::string>({"cat"})); // song dictionaries never leak between instances
   CHECK(tokens("").empty());
@@ -176,7 +188,8 @@ void testLyricTokenApi() {
 
   // Moving flowing tokens into explicit per-note lyrics must be acoustically
   // identical, including automatic syllables, custom splits and one-note ties.
-  for (const char* line : {"I remember the canoe _", "re- _ member", "wanna~ ~ + {R IH M EH M B ER}", "hel-lo world"}) {
+  for (const char* line : {"I remember the canoe _", "re- _ member", "wanna~ ~ + {R IH M EH M B ER}", "hel-lo world",
+                           "a-ma-zing grace~and fire~"}) {
     novox::Score flow;
     flow.lyrics = line;
     for (size_t i = 0; i < 12; ++i) flow.notes.push_back({i * .5, .5, 60, ""});
@@ -520,6 +533,497 @@ void testMusicXmlImport() {
   CHECK_NEAR(s.tempo, 60.0, 1e-9);
 }
 
+// ---------------------------------------------------------------------------
+// Notation-app exports (tests/fixtures/notation: hand-written files laid out
+// like MuseScore Studio 4.7 and Dorico 5/6 exports; each file says how).
+
+struct Imported {
+  novox::Score score;
+  novox::ImportInfo info;
+  std::vector<std::string> warnings;
+};
+
+Imported importBytes(const std::string& bytes, novox::ImportOptions opts = {}) {
+  Imported r;
+  r.score = novox::importAny(std::vector<uint8_t>(bytes.begin(), bytes.end()), opts, r.warnings, &r.info);
+  return r;
+}
+
+std::string notationFixture(const std::string& name) {
+  return readFile(std::string(NOVOX_SOURCE_DIR) + "/tests/fixtures/notation/" + name);
+}
+
+// Imported in beats, which keeps positions exact.
+Imported importFixture(const std::string& name, novox::ImportOptions opts = {}) {
+  opts.beats = true;
+  return importBytes(notationFixture(name), opts);
+}
+
+std::vector<std::string> lyricsOf(const novox::Score& s) {
+  std::vector<std::string> out;
+  for (const auto& n : s.notes) out.push_back(n.lyric);
+  return out;
+}
+
+std::vector<double> startsOf(const novox::Score& s) {
+  std::vector<double> out;
+  for (const auto& n : s.notes) out.push_back(n.start);
+  return out;
+}
+
+bool sameTimes(const std::vector<double>& a, const std::vector<double>& b) {
+  if (a.size() != b.size()) return false;
+  for (size_t i = 0; i < a.size(); ++i)
+    if (std::fabs(a[i] - b[i]) > 1e-6) return false;
+  return true;
+}
+
+bool warned(const std::vector<std::string>& warnings, const std::string& text) {
+  for (const auto& w : warnings)
+    if (w.find(text) != std::string::npos) return true;
+  return false;
+}
+
+void testMuseScoreHymnImport() {
+  // Piano listed first, the voice part second: the part with lyrics is sung.
+  Imported h = importFixture("musescore-hymn.musicxml");
+  const auto& info = h.info;
+  CHECK(info.format == "musicxml" && info.part == 1 && info.partVoice == "1");
+  CHECK(info.parts.size() == 2);
+  if (info.parts.size() == 2) {
+    const auto& piano = info.parts[0];
+    const auto& voice = info.parts[1];
+    CHECK(piano.id == "P1" && piano.name == "Piano" && piano.notes == 10 && piano.lyrics == 0 && piano.verses.empty());
+    CHECK(piano.voices.size() == 2 && piano.voices[0].id == "1" && piano.voices[1].id == "5");
+    CHECK(voice.id == "P2" && voice.name == "Voice" && voice.notes == 11 && voice.lyrics == 9);
+    CHECK((voice.verses == std::vector<int>{1, 2}));
+    CHECK(voice.voices.size() == 2 && voice.voices[0].id == "1" && voice.voices[0].lyrics == 9 &&
+          voice.voices[1].id == "2" && voice.voices[1].notes == 1);
+  }
+  // Pickup "A", then m1-m3 with verse 1 and the first ending, m1-m2 with verse 2 and the second
+  // ending, then the last measure. The elision typed in one <text> joins on one note; the
+  // extender holds "sweet" over the next note; the cue note takes its beat and is not sung;
+  // the closing chord (written lowest first) keeps its top note and the lyric on its lowest.
+  CHECK((lyricsOf(h.score) == std::vector<std::string>{"A", "ma-", "zing", "grace~and", "so", "sweet", "_", "pre-",
+                                                        "cious", "love", "is", "mine", "Home"}));
+  CHECK(sameTimes(startsOf(h.score), {0, 1, 3, 5, 7, 8, 9, 10, 12, 14, 16, 17, 19}));
+  CHECK(!h.score.notes.empty() && h.score.notes.back().pitch == 76 && std::fabs(h.score.notes.back().dur - 3) < 1e-9);
+  CHECK(info.fileLyrics && info.repeats && info.unfolded && info.verse == 0);
+  CHECK_NEAR(info.pickupBeats, 1.0, 1e-9);
+  CHECK(info.meters.size() == 1 && info.meters[0].beats == 3 && info.meters[0].beatType == 4);
+  // Tempo marks sit in the piano part only; MuseScore rounds them to two decimals.
+  CHECK(info.tempos.size() == 2);
+  if (info.tempos.size() == 2) {
+    CHECK_NEAR(info.tempos[0].bpm, 66.67, 1e-9);
+    CHECK_NEAR(info.tempos[1].beat, 19.0, 1e-9);
+    CHECK_NEAR(info.tempos[1].bpm, 60.0, 1e-9);
+    CHECK_NEAR(info.tempos[1].seconds, 19 * 60 / 66.67, 1e-9);
+  }
+  CHECK_NEAR(h.score.tempo, 66.67, 1e-9);
+  CHECK(warned(h.warnings, "1 chord note(s) dropped (kept the top note)"));
+  CHECK(warned(h.warnings, "1 note(s) in other voices skipped"));
+  CHECK(!warned(h.warnings, "not sung"));
+
+  // Seconds follow the tempo map.
+  novox::ImportOptions seconds;
+  std::vector<std::string> warnings;
+  std::string xml = notationFixture("musescore-hymn.musicxml");
+  novox::Score s = novox::importAny(std::vector<uint8_t>(xml.begin(), xml.end()), seconds, warnings);
+  CHECK(s.notes.size() == 13 && std::fabs(s.notes.back().start - 19 * 60 / 66.67) < 1e-9 &&
+        std::fabs(s.notes.back().dur - 3.0) < 1e-9);
+
+  // The file's own lyrics win over a lyric line given with it.
+  novox::ImportOptions withLine;
+  withLine.lyrics = "hel-lo, I'm a new vir-tual sing-er";
+  Imported own = importFixture("musescore-hymn.musicxml", withLine);
+  CHECK(own.score.lyrics.empty() && own.score.notes.size() == 13 && own.score.notes[0].lyric == "A");
+  CHECK(warned(own.warnings, "own lyrics"));
+
+  // As written: no repeats, verse 1 where there is one (the second ending has only verse 2).
+  novox::ImportOptions written;
+  written.unfold = false;
+  Imported w = importFixture("musescore-hymn.musicxml", written);
+  CHECK((lyricsOf(w.score) == std::vector<std::string>{"A", "ma-", "zing", "grace~and", "so", "sweet", "_", "is",
+                                                        "mine", "Home"}));
+  CHECK(w.info.repeats && !w.info.unfolded && w.info.verse == 1);
+
+  // One verse throughout: verse 2 where a measure has it, else the verse below.
+  novox::ImportOptions verse2;
+  verse2.verse = 2;
+  Imported v = importFixture("musescore-hymn.musicxml", verse2);
+  CHECK((lyricsOf(v.score) == std::vector<std::string>{"A", "pre-", "cious", "love", "so", "sweet", "_", "pre-",
+                                                        "cious", "love", "is", "mine", "Home"}));
+  CHECK(v.info.verse == 2);
+
+  // Another voice of the part, and the piano.
+  novox::ImportOptions alto;
+  alto.partVoice = "2";
+  Imported a = importFixture("musescore-hymn.musicxml", alto);
+  CHECK(a.score.notes.size() == 2 && a.score.notes[0].pitch == 69);
+  CHECK(sameTimes(startsOf(a.score), {3, 12}));
+  CHECK(a.info.partVoice == "2" && !a.info.fileLyrics && warned(a.warnings, "no lyrics"));
+  novox::ImportOptions piano;
+  piano.track = 0;
+  Imported p = importFixture("musescore-hymn.musicxml", piano);
+  std::vector<float> tops;
+  for (const auto& n : p.score.notes) tops.push_back(n.pitch);
+  CHECK((tops == std::vector<float>{67, 72, 74, 67, 72, 74, 67}));  // top notes; no first ending on pass 2
+  CHECK(p.info.part == 0 && p.info.partVoice == "1" && warned(p.warnings, "10 chord note(s) dropped"));
+  bool threw = false;
+  try {
+    novox::ImportOptions missing;
+    missing.partVoice = "7";
+    importFixture("musescore-hymn.musicxml", missing);
+  } catch (const std::runtime_error& e) {
+    threw = std::string(e.what()).find("no voice 7") != std::string::npos;
+  }
+  CHECK(threw);
+}
+
+void testDoricoImport() {
+  Imported d = importFixture("dorico-carol.musicxml");
+  // Verse 1 to the D.C. (verse numbers written out of order), verse 2 after it up to Fine.
+  // The elision between two <text>s joins on one note; cue notes take their time unsung.
+  CHECK((lyricsOf(d.score) == std::vector<std::string>{"Glo-", "ri-", "a~in", "ex-", "cel-", "sis", "De-", "o", "Al-",
+                                                        "le-", "lu-", "ia", "A-", "men", "Sing", "we", "now", "to",
+                                                        "the", "Lord"}));
+  // A second voice that stops short (no <forward>) doesn't pull the next measure in.
+  CHECK(sameTimes(startsOf(d.score),
+                  {0, 1, 2, 4, 5, 6, 10, 11, 12, 14, 16, 18, 20, 22, 24, 25, 26, 28, 29, 30}));
+  CHECK(d.info.part == 0 && d.info.partVoice == "1" && d.info.unfolded && d.info.pickupBeats == 0);
+  CHECK(d.info.parts.size() == 2 && d.info.parts[1].name == "Bass Clarinet in B\xE2\x99\xAD");
+  CHECK(d.info.parts.size() == 2 && (d.info.parts[0].verses == std::vector<int>{1, 2}));
+  CHECK(warned(d.warnings, "2 note(s) in other voices skipped"));
+  // The bare <sound tempo>, a dotted metronome mark with no <sound> (dotted quarter = 60 is
+  // 90 bpm), and the D.C. back to the first tempo.
+  CHECK(d.info.tempos.size() == 3);
+  if (d.info.tempos.size() == 3) {
+    CHECK_NEAR(d.info.tempos[0].bpm, 96, 1e-9);
+    CHECK_NEAR(d.info.tempos[1].beat, 18, 1e-9);
+    CHECK_NEAR(d.info.tempos[1].bpm, 90, 1e-9);
+    CHECK_NEAR(d.info.tempos[2].beat, 24, 1e-9);
+    CHECK_NEAR(d.info.tempos[2].bpm, 96, 1e-9);
+    CHECK_NEAR(d.info.tempos[2].seconds, 18 * 60.0 / 96 + 6 * 60.0 / 90, 1e-9);
+  }
+
+  // The bass clarinet sounds a major ninth below its written D4, and follows the D.C. that
+  // only the top part carries.
+  novox::ImportOptions clarinet;
+  clarinet.track = 1;
+  Imported c = importFixture("dorico-carol.musicxml", clarinet);
+  CHECK(c.score.notes.size() == 2 && c.score.notes[0].pitch == 48 && c.score.notes[1].pitch == 48);
+  CHECK(sameTimes(startsOf(c.score), {0, 24}));
+  CHECK_NEAR(c.score.tempo, 96, 1e-9);
+
+  novox::ImportOptions verse1;
+  verse1.verse = 1;
+  Imported v = importFixture("dorico-carol.musicxml", verse1);
+  CHECK(v.score.notes.size() == 20 && v.score.notes[14].lyric == "Glo-" && v.score.notes[19].lyric == "sis");
+  novox::ImportOptions written;
+  written.unfold = false;
+  Imported w = importFixture("dorico-carol.musicxml", written);
+  CHECK(w.score.notes.size() == 14 && w.score.notes.back().lyric == "men");
+  CHECK(warned(w.warnings, "lyric verse(s) 2 not sung"));
+}
+
+void testMuseScoreCodaImport() {
+  // A repeat played three times (a verse each), D.S. al Coda with the marks only in the
+  // piano part, and a coda in 3/4.
+  Imported m = importFixture("musescore-coda.musicxml");
+  CHECK((lyricsOf(m.score) == std::vector<std::string>{"one", "two", "three", "sing", "high", "now", "and", "ring",
+                                                        "out", "loud", "end"}));
+  CHECK(sameTimes(startsOf(m.score), {0, 4, 8, 12, 14, 16, 20, 24, 26, 28, 32}));
+  CHECK(m.info.meters.size() == 2);
+  if (m.info.meters.size() == 2) {
+    CHECK(m.info.meters[0].beats == 4 && m.info.meters[1].beats == 3 && m.info.meters[1].beatType == 4);
+    CHECK_NEAR(m.info.meters[1].beat, 32, 1e-9);
+    CHECK_NEAR(m.info.meters[1].seconds, 16, 1e-9);
+  }
+  CHECK(m.info.tempos.size() == 1 && std::fabs(m.info.tempos[0].bpm - 120) < 1e-9);
+  novox::ImportOptions written;
+  written.unfold = false;
+  Imported w = importFixture("musescore-coda.musicxml", written);
+  CHECK((lyricsOf(w.score) == std::vector<std::string>{"one", "sing", "high", "now", "and", "end"}));
+  CHECK(sameTimes(startsOf(w.score), {0, 4, 6, 8, 12, 16}));
+  CHECK(warned(w.warnings, "lyric verse(s) 2, 3 not sung"));
+}
+
+// Parsing details: numeric character references, chords whose lyric is on a lower
+// note, and measures that start where the longest voice ended.
+void testMusicXmlDetails() {
+  auto score = [](const std::string& notes) {
+    return "<score-partwise><part-list><score-part id=\"P1\"><part-name>S</part-name></score-part></part-list>"
+           "<part id=\"P1\"><measure number=\"1\"><attributes><divisions>1</divisions></attributes>" +
+           notes + "</measure></part></score-partwise>";
+  };
+  auto note = [](const std::string& pitch, const std::string& inner) {
+    return "<note><pitch><step>" + pitch.substr(0, 1) + "</step><octave>" + pitch.substr(1) +
+           "</octave></pitch><duration>1</duration><voice>1</voice>" + inner + "</note>";
+  };
+  auto lyric = [](const std::string& text) { return "<lyric><syllabic>single</syllabic><text>" + text + "</text></lyric>"; };
+  // Malformed references are kept as text instead of failing the import; ones beyond U+FFFF are
+  // four UTF-8 bytes.
+  Imported refs = importBytes(score(note("C4", lyric("caf&#xE9;")) + note("D4", lyric("&#x1F600;")) +
+                                    note("E4", lyric("a&#;b")) + note("F4", lyric("&#xZZ;")) +
+                                    note("G4", lyric("&#99999999999;"))));
+  CHECK((lyricsOf(refs.score) == std::vector<std::string>{"caf\xC3\xA9", "\xF0\x9F\x98\x80", "a&#;b", "&#xZZ;",
+                                                           "&#99999999999;"}));
+  // A chord written lowest first keeps its top note and the lyric from the lowest.
+  Imported chord = importBytes(score(note("C4", lyric("hey")) + "<note><chord/><pitch><step>G</step><octave>4</octave>"
+                                     "</pitch><duration>1</duration><voice>1</voice></note>"));
+  CHECK(chord.score.notes.size() == 1 && chord.score.notes[0].pitch == 67 && chord.score.notes[0].lyric == "hey");
+  CHECK(warned(chord.warnings, "1 chord note(s) dropped"));
+  // Cue notes take their time in the voice; grace notes take none.
+  Imported cue = importBytes(score("<note><cue/><pitch><step>E</step><octave>4</octave></pitch><duration>2</duration>"
+                                   "<voice>1</voice></note><note><grace/><pitch><step>F</step><octave>4</octave>"
+                                   "</pitch><voice>1</voice></note>" + note("G4", lyric("late"))),
+                               {});
+  CHECK(cue.score.notes.size() == 1 && std::fabs(cue.score.notes[0].start - 1.0) < 1e-9);  // 2 beats at 120 bpm
+  CHECK(warned(cue.warnings, "1 grace note(s) skipped"));
+  // A lyric line is still used for a file without lyrics.
+  novox::ImportOptions line;
+  line.lyrics = "hel-lo";
+  Imported hum = importBytes(score(note("C4", "") + note("D4", "")), line);
+  CHECK(hum.score.lyrics == "hel-lo" && !hum.info.fileLyrics);
+
+  // Several measures (4/4, one quarter-note lyric each unless empty).
+  auto measures = [&](const std::vector<std::string>& bars) {
+    std::string xml = "<score-partwise><part-list><score-part id=\"P1\"/></part-list><part id=\"P1\">";
+    for (size_t i = 0; i < bars.size(); ++i) {
+      xml += "<measure number=\"" + std::to_string(i + 1) + "\">";
+      if (i == 0) xml += "<attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>";
+      xml += bars[i] + "</measure>";
+    }
+    return xml + "</part></score-partwise>";
+  };
+  const std::string fwd = "<barline location=\"left\"><repeat direction=\"forward\"/></barline>";
+  const std::string back = "<barline location=\"right\"><repeat direction=\"backward\"/></barline>";
+  novox::ImportOptions beats;
+  beats.beats = true;
+  // An empty measure still takes its time signature's length.
+  Imported empty = importBytes(measures({"", note("C4", lyric("late"))}), beats);
+  CHECK(empty.score.notes.size() == 1 && std::fabs(empty.score.notes[0].start - 4) < 1e-9);
+  // As MuseScore plays repeats: an end repeat goes back to the latest start repeat, whose passes
+  // each later end repeat adds to. |: A :| B :| plays A A B A B ...
+  Imported twice = importBytes(measures({fwd + note("C4", lyric("a")) + back, note("D4", lyric("b")) + back}), beats);
+  CHECK((lyricsOf(twice.score) == std::vector<std::string>{"a", "a", "b", "a", "b"}));
+  // ... and |: A |: B :| C :| D plays A B B C B C D.
+  Imported nested = importBytes(measures({fwd + note("C4", lyric("a")), fwd + note("D4", lyric("b")) + back,
+                                          note("E4", lyric("c")) + back, note("F4", lyric("d"))}),
+                                beats);
+  CHECK((lyricsOf(nested.score) == std::vector<std::string>{"a", "b", "b", "c", "b", "c", "d"}));
+  CHECK(sameTimes(startsOf(nested.score), {0, 1, 2, 3, 4, 5, 6}));  // each measure as long as its one note
+  // A verse's melisma held over a measure that has only another verse's syllables: MuseScore
+  // writes the extender on its first note only. Pass 2 holds "all"; pass 1 sings verse 1.
+  auto two = [&](const std::string& pitch, const std::string& one, const std::string& second, const std::string& extra = "") {
+    std::string l = "<lyric number=\"1\"><syllabic>" + one.substr(0, one.find(':')) + "</syllabic><text>" +
+                    one.substr(one.find(':') + 1) + "</text></lyric>";
+    if (!second.empty()) l += "<lyric number=\"2\"><syllabic>single</syllabic><text>" + second + "</text>" + extra + "</lyric>";
+    return "<note><pitch><step>" + pitch.substr(0, 1) + "</step><octave>" + pitch.substr(1) +
+           "</octave></pitch><duration>2</duration><voice>1</voice>" + l + "</note>";
+  };
+  Imported held = importBytes(measures({fwd + two("C4", "begin:Hal", "all", "<extend/>") + two("D4", "middle:le", ""),
+                                        two("E4", "middle:lu", "") + two("F4", "end:jah", "") + back}),
+                              beats);
+  CHECK((lyricsOf(held.score) == std::vector<std::string>{"Hal-", "le-", "lu-", "jah", "all", "_", "_", "_"}));
+  // A tempo mark after the start: the score starts at 120 (as notation apps play it), not at the mark.
+  Imported late = importBytes(measures({note("C4", lyric("a")), "<sound tempo=\"60\"/>" + note("D4", lyric("b"))}), beats);
+  CHECK_NEAR(late.score.tempo, 120.0, 1e-9);
+  CHECK(late.info.tempos.size() == 2 && std::fabs(late.info.tempos[0].bpm - 120) < 1e-9 &&
+        std::fabs(late.info.tempos[1].bpm - 60) < 1e-9);
+  // The voice sung: the first with lyrics (a soprano with melismas over a fully texted alto),
+  // unless another has more than twice as many.
+  auto voiced = [&](const std::string& v, const std::string& pitch, const std::string& text) {
+    return "<note><pitch><step>" + pitch.substr(0, 1) + "</step><octave>" + pitch.substr(1) +
+           "</octave></pitch><duration>1</duration><voice>" + v + "</voice>" +
+           (text.empty() ? "" : lyric(text)) + "</note>";
+  };
+  const std::string backup = "<backup><duration>4</duration></backup>";
+  Imported satb = importBytes(measures({voiced("1", "E5", "Glo") + voiced("1", "F5", "") + voiced("1", "G5", "ri") +
+                                        voiced("1", "A5", "a") + backup + voiced("2", "C5", "Glo") + voiced("2", "D5", "o") +
+                                        voiced("2", "E5", "ri") + voiced("2", "F5", "a")}),
+                              beats);
+  CHECK(satb.info.partVoice == "1" && satb.score.notes.size() == 4 && satb.score.notes[0].pitch == 76);
+  Imported alto = importBytes(measures({voiced("1", "E5", "Ah") + voiced("1", "F5", "") + voiced("1", "G5", "") +
+                                        voiced("1", "A5", "") + backup + voiced("2", "C5", "Glo") + voiced("2", "D5", "o") +
+                                        voiced("2", "E5", "ri") + voiced("2", "F5", "a")}),
+                              beats);
+  CHECK(alto.info.partVoice == "2" && alto.score.notes.size() == 4 && alto.score.notes[0].pitch == 72);
+  // A D.S. with no segno anywhere is played on, with a warning.
+  Imported nosegno = importBytes(measures({note("C4", lyric("x")), "<sound dalsegno=\"segno\"/>" + note("D4", lyric("y"))}), beats);
+  CHECK(nosegno.score.notes.size() == 2 && warned(nosegno.warnings, "D.S. without a segno"));
+}
+
+// MuseScore's MIDI export: a conductor track, a piano listed first, and the voice with
+// every verse's syllable at the same tick, a trailing space ending each word.
+std::vector<uint8_t> museScoreMidi(const std::vector<std::vector<std::string>>& syllables) {
+  auto vlq = [](std::vector<uint8_t>& t, uint32_t v) {
+    uint8_t b[5];
+    int n = 0;
+    b[n++] = v & 0x7F;
+    while (v >>= 7) b[n++] = static_cast<uint8_t>(0x80 | (v & 0x7F));
+    while (n) t.push_back(b[--n]);
+  };
+  auto meta = [&](std::vector<uint8_t>& t, uint32_t delta, uint8_t type, const std::string& data) {
+    vlq(t, delta);
+    t.push_back(0xFF);
+    t.push_back(type);
+    vlq(t, static_cast<uint32_t>(data.size()));
+    t.insert(t.end(), data.begin(), data.end());
+  };
+  auto event = [&](std::vector<uint8_t>& t, uint32_t delta, uint8_t status, uint8_t pitch, uint8_t velocity) {
+    vlq(t, delta);
+    t.insert(t.end(), {status, pitch, velocity});
+  };
+  std::vector<uint8_t> conductor, piano, voice;
+  meta(conductor, 0, 0x58, std::string("\x03\x02\x18\x08", 4));  // 3/4
+  meta(conductor, 0, 0x51, std::string("\x09\x27\xC0", 3));      // 100 bpm
+  meta(conductor, 0, 0x2F, "");
+  meta(piano, 0, 0x03, "Piano");
+  event(piano, 0, 0x90, 48, 80);
+  event(piano, 0, 0x90, 52, 80);
+  event(piano, 1440, 0x80, 48, 0);
+  event(piano, 0, 0x80, 52, 0);
+  meta(piano, 0, 0x2F, "");
+  meta(voice, 0, 0x03, "Voice");
+  const uint8_t pitches[] = {60, 62, 64, 65, 67};
+  for (size_t i = 0; i < syllables.size(); ++i) {
+    for (const auto& s : syllables[i]) meta(voice, 0, 0x05, s);
+    event(voice, 0, 0x90, pitches[i % 5], 80);
+    event(voice, 480, 0x80, pitches[i % 5], 0);
+  }
+  meta(voice, 0, 0x2F, "");
+  std::vector<uint8_t> f = {'M', 'T', 'h', 'd', 0, 0, 0, 6, 0, 1, 0, 3, 0x01, 0xE0};
+  for (const auto* t : {&conductor, &piano, &voice}) {
+    f.insert(f.end(), {'M', 'T', 'r', 'k'});
+    const uint32_t n = static_cast<uint32_t>(t->size());
+    for (int shift = 24; shift >= 0; shift -= 8) f.push_back(static_cast<uint8_t>(n >> shift));
+    f.insert(f.end(), t->begin(), t->end());
+  }
+  return f;
+}
+
+void testMidiLyricConventions() {
+  // "Hel" "lo ": no trailing space means the word goes on. A NUL byte inside a lyric is dropped.
+  const auto midi = museScoreMidi({{"Hel", "Dar"}, {"lo ", "ling "}, {std::string("wor\0ld ", 7), "dear "}});
+  Imported m = importBytes(std::string(midi.begin(), midi.end()));
+  CHECK((lyricsOf(m.score) == std::vector<std::string>{"Hel-", "lo", "world"}));
+  CHECK(m.info.format == "midi" && m.info.part == 2 && m.info.parts.size() == 3);
+  if (m.info.parts.size() == 3) {
+    CHECK(m.info.parts[1].name == "Piano" && m.info.parts[1].notes == 1 && m.info.parts[1].lyrics == 0);
+    CHECK(m.info.parts[2].name == "Voice" && m.info.parts[2].notes == 3 && m.info.parts[2].lyrics == 3 &&
+          (m.info.parts[2].verses == std::vector<int>{1, 2}));
+  }
+  CHECK(m.info.meters.size() == 1 && m.info.meters[0].beats == 3 && m.info.meters[0].beatType == 4);
+  CHECK(m.info.tempos.size() == 1 && std::fabs(m.info.tempos[0].bpm - 100) < 1e-9);
+  CHECK(warned(m.warnings, "2 verses"));
+  novox::ImportOptions verse2;
+  verse2.verse = 2;
+  Imported v = importBytes(std::string(midi.begin(), midi.end()), verse2);
+  CHECK((lyricsOf(v.score) == std::vector<std::string>{"Dar-", "ling", "dear"}));
+  // Karaoke files mark a new word with a leading space (or "/" for a new line).
+  const auto kar = museScoreMidi({{"Hel"}, {"lo"}, {" big"}, {"/wor"}, {"ld"}});
+  Imported k = importBytes(std::string(kar.begin(), kar.end()));
+  CHECK((lyricsOf(k.score) == std::vector<std::string>{"Hel-", "lo", "big", "wor-", "ld"}));
+  // A line break at a line's end ends that word only: it doesn't make the file a trailing-space one.
+  const auto lines = museScoreMidi({{"Twin"}, {"kle"}, {" twin"}, {"kle"}, {" star\r"}, {"How"}, {" I"}, {" won"}, {"der\r\n"}});
+  Imported l = importBytes(std::string(lines.begin(), lines.end()));
+  CHECK((lyricsOf(l.score) ==
+         std::vector<std::string>{"Twin-", "kle", "twin-", "kle", "star", "How", "I", "won-", "der"}));
+  // The last syllable of a trailing-space file ends its word even without the space.
+  const auto last = museScoreMidi({{"Twin"}, {"kle "}, {"star"}});
+  CHECK((lyricsOf(importBytes(std::string(last.begin(), last.end())).score) == std::vector<std::string>{"Twin-", "kle", "star"}));
+  // Hyphenated files are unchanged; the JSON stays whole after a NUL.
+  novox_engine* e = novox_create(22050);
+  char* json = novox_import(e, midi.data(), midi.size(), "{\"lyrics\": \"la la\"}");
+  CHECK(json != nullptr);
+  if (json) {
+    const auto root = novox::json::parse(json);
+    CHECK(!root.has("lyrics") && root["notes"].array.size() == 3 && root["notes"].array[2].str("lyric", "") == "world");
+    CHECK(root["import"]["parts"].array.size() == 3 && root["import"].str("format", "") == "midi");
+  }
+  novox_free(json);
+  // A file without lyrics still takes the lyric line.
+  const auto plain = tempoChangeMidi();
+  json = novox_import(e, plain.data(), plain.size(), "{\"lyrics\": \"la la\"}");
+  CHECK(json && novox::json::parse(json).str("lyrics", "") == "la la");
+  novox_free(json);
+
+  // MuseScore writes only the verses that have a syllable at a tick. Where another verse holds a
+  // melisma, each syllable goes to the verse it makes a word in, and the import says so.
+  auto verses = [&](const std::vector<uint8_t>& f, int verse, std::vector<std::string>* warnings = nullptr) {
+    const std::string options = "{\"verse\": " + std::to_string(verse) + "}";
+    char* out = novox_import(e, f.data(), f.size(), options.c_str());
+    std::vector<std::string> sung;
+    if (out) {
+      const auto root = novox::json::parse(out);
+      for (const auto& n : root["notes"].array) sung.push_back(n.str("lyric", ""));
+      if (warnings)
+        for (const auto& w : root["importWarnings"].array) warnings->push_back(w.string);
+    }
+    novox_free(out);
+    return sung;
+  };
+  // "Glo ri _ a" and "Sing to the Lord": "the" belongs to verse 2, whose word ended.
+  const auto gloria = museScoreMidi({{"Glo", "Sing "}, {"ri", "to "}, {"the "}, {"a ", "Lord "}});
+  std::vector<std::string> said;
+  CHECK((verses(gloria, 1, &said) == std::vector<std::string>{"Glo-", "ri-", "", "a"}));
+  CHECK(warned(said, "1 note(s) have lyrics for only some of the 2 verses"));
+  CHECK((verses(gloria, 2) == std::vector<std::string>{"Sing", "to", "the", "Lord"}));
+  // "Hel lo world" and "Dar _ ling": "lo" finishes verse 1's word.
+  const auto darling = museScoreMidi({{"Hel", "Dar"}, {"lo "}, {"world ", "ling "}});
+  CHECK((verses(darling, 1) == std::vector<std::string>{"Hel-", "lo", "world"}));
+  CHECK((verses(darling, 2) == std::vector<std::string>{"Dar-", "", "ling"}));
+  // "Hel lo" and "Love _": a word in progress goes on rather than a word held.
+  const auto love = museScoreMidi({{"Hel", "Love "}, {"lo "}});
+  CHECK((verses(love, 1) == std::vector<std::string>{"Hel-", "lo"}));
+  CHECK((verses(love, 2) == std::vector<std::string>{"Love", ""}));
+  said.clear();
+  CHECK((verses(love, 5, &said) == std::vector<std::string>{"Love", ""}));
+  CHECK(warned(said, "no verse 5; sang verse 2"));
+  novox_destroy(e);
+}
+
+void testImportJsonApi() {
+  const std::string xml = notationFixture("musescore-hymn.musicxml");
+  novox_engine* e = novox_create(22050);
+  char* json = novox_import(e, xml.data(), xml.size(), "{\"units\": \"beats\", \"lyrics\": \"hel-lo\"}");
+  CHECK(json != nullptr);
+  if (json) {
+    const std::string text = json;
+    CHECK(text.find("\"bpm\": 66.67}") != std::string::npos);  // unrounded
+    const auto root = novox::json::parse(text);
+    const auto& info = root["import"];
+    CHECK(!root.has("lyrics"));
+    CHECK(info.str("format", "") == "musicxml" && info.num("part", -1) == 1 && info.str("partVoice", "") == "1");
+    CHECK(info["fileLyrics"].boolean && info["unfolded"].boolean && info.num("pickupBeats", 0) == 1);
+    CHECK(info["tempoMap"].array.size() == 2 && info["timeSignatures"].array.size() == 1);
+    CHECK(info["timeSignatures"].array.size() == 1 && info["timeSignatures"].array[0].num("beats", 0) == 3);
+    CHECK(info["parts"].array.size() == 2 && info["parts"].array[0].str("name", "") == "Piano");
+    CHECK(info["parts"].array.size() == 2 && info["parts"].array[1]["voices"].array.size() == 2 &&
+          info["parts"].array[1]["verses"].array.size() == 2);
+    CHECK(root["importWarnings"].array.size() >= 3);
+    // Still a score the renderer reads.
+    novox::Score s = novox::parseScore(root);
+    CHECK(s.notes.size() == 13 && s.notes[3].lyric == "grace~and");
+  }
+  novox_free(json);
+  // Options: a voice id given as a number, verse, unfold, and their type checks.
+  json = novox_import(e, xml.data(), xml.size(), "{\"partVoice\": 2, \"verse\": 1, \"unfold\": false}");
+  CHECK(json && novox::json::parse(json)["notes"].array.size() == 1);
+  novox_free(json);
+  for (const char* bad : {"{\"verse\": \"two\"}", "{\"verse\": -1}", "{\"unfold\": 1}", "{\"partVoice\": true}"}) {
+    CHECK(novox_import(e, xml.data(), xml.size(), bad) == nullptr);
+  }
+  CHECK(novox_import(e, xml.data(), xml.size(), "{\"partVoice\": \"9\"}") == nullptr);
+  CHECK(std::string(novox_last_error(e)).find("no voice 9") != std::string::npos);
+  // Compressed MusicXML is a zip the engine can't open: say what to do.
+  const char mxl[] = "PK\x03\x04 META-INF/container.xml";
+  CHECK(novox_import(e, mxl, sizeof mxl - 1, nullptr) == nullptr);
+  CHECK(std::string(novox_last_error(e)).find(".mxl") != std::string::npos);
+  novox_destroy(e);
+}
+
 void testTranscribeMelody() {
   // A sine-like "voice" (with harmonics) singing C4 D4 E4 E4 (repeat after a short gap) G4.
   const double sr = 44100;
@@ -858,6 +1362,12 @@ int main() {
       {"MIDI import", testMidiImport},
       {"MIDI import in beats", testMidiImportBeats},
       {"MusicXML import", testMusicXmlImport},
+      {"MuseScore MusicXML: parts, pickup, repeats, verses", testMuseScoreHymnImport},
+      {"Dorico MusicXML: D.C. al Fine, tempo, transposition", testDoricoImport},
+      {"MuseScore MusicXML: D.S. al Coda, times, meter", testMuseScoreCodaImport},
+      {"MusicXML details", testMusicXmlDetails},
+      {"MIDI lyric conventions", testMidiLyricConventions},
+      {"import JSON and options", testImportJsonApi},
       {"transcribe melody", testTranscribeMelody},
       {"transcribe held notes", testTranscribeHeldNotes},
       {"singing-v1", testSingingV1},

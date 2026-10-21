@@ -89,14 +89,17 @@ export class Singer {
     if (rc !== 0) throw new NovoxError(this._error());
   }
 
-  /** MIDI or MusicXML bytes (Uint8Array / ArrayBuffer) -> score object. */
-  importFile(bytes, { lyrics = "", track = -1, voice = "" } = {}) {
+  /** MIDI or MusicXML bytes (Uint8Array / ArrayBuffer) -> score object. The file's own lyrics
+   *  are sung when it has them (`lyrics` is for a file without any); `partVoice`, `verse` and
+   *  `unfold: false` pick a MusicXML voice, one lyric verse and repeats as written. What the
+   *  file holds (parts, tempo map, time signatures, pickup) is under `import`. */
+  importFile(bytes, { lyrics = "", track = -1, voice = "", partVoice = "", verse = 0, unfold = true } = {}) {
     const M = this.M;
     const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
     const buf = M._malloc(data.length);
     try {
       M.HEAPU8.set(data, buf);
-      const opts = JSON.stringify({ lyrics, track, ...(voice ? { voice } : {}) });
+      const opts = JSON.stringify({ lyrics, track, verse, unfold, ...(voice ? { voice } : {}), ...(partVoice ? { partVoice: String(partVoice) } : {}) });
       const json = this._takeString(this._withString(opts, (o) => M._novox_import(this.engine, buf, data.length, o)));
       return JSON.parse(json);
     } finally {

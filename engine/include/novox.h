@@ -52,10 +52,27 @@ NOVOX_API char* novox_plan(novox_engine* engine, const char* score_json);
 
 /* Converts a MIDI file or (uncompressed) MusicXML file to a score JSON string
  * that novox_render / novox_stream_create accept. `options_json` may be NULL or e.g.
- * {"track": 1, "lyrics": "hel-lo world", "voice": "robot"}. "units": "beats" keeps the
- * file's own beat positions (ticks / divisions) instead of converting through its tempo
- * map to seconds. Import warnings are included in the result under "importWarnings".
- * NULL on error. */
+ * {"track": 1, "lyrics": "hel-lo world", "voice": "robot"}:
+ *   track      MIDI track / MusicXML part index (default: the first with lyrics,
+ *              else the first with notes).
+ *   lyrics     a lyric line for a file without lyrics; a file's own lyrics win
+ *              (one syllable per note) and the line is then not used or echoed.
+ *   units      "beats" keeps the file's own beat positions (quarter notes from the
+ *              start of the first measure, a pickup's included) instead of converting
+ *              through its tempo map to seconds.
+ *   partVoice  MusicXML <voice> to sing (default: the first with lyrics, unless
+ *              another has more than twice as many).
+ *   verse      lyric verse to sing (default 0: verse N on repeat pass N, else verse 1).
+ *   unfold     MusicXML repeats, endings, D.C./D.S., coda and fine played out in
+ *              order as MuseScore plays them (default true); false reads the
+ *              measures as written.
+ * Import warnings are included in the result under "importWarnings", and what the
+ * file holds under "import": {"format", "part", "partVoice", "verse", "fileLyrics",
+ * "repeats", "unfolded", "pickupBeats", "tempoMap": [{"beat", "seconds", "bpm"}],
+ * "timeSignatures": [{"beat", "seconds", "beats", "beatType"}], "parts": [{"index",
+ * "id", "name", "notes", "lyrics", "verses": [1, 2], "voices": [{"voice", "notes",
+ * "lyrics"}]}]} (beats are quarter notes from time 0, tempos unrounded).
+ * Compressed MusicXML (.mxl) is rejected: unzip it first. NULL on error. */
 NOVOX_API char* novox_import(novox_engine* engine, const void* data, size_t size, const char* options_json);
 
 /* Transcribes a sung recording into a score: melody from pitch tracking, and,

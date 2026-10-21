@@ -10,15 +10,19 @@
 //   getPlan() -> string JSON ("" on error) getVoices() -> string[]
 //   planSong(json,bpm) -> string JSON plan for an edit, without changing the processor song
 //   setCapture(bool)  setTransport(bool)  setTempo(bpm)  setPlayhead(beats) (no host: where Play starts)
-//   importFile(base64, lyrics) -> string JSON (seconds) or ""
+//   importFile(base64, lyrics, {track, partVoice, verse}) -> string JSON: the engine's score of a
+//     MIDI, MusicXML or .mxl file in beats, with "import" (parts, tempo map...) and "importWarnings";
+//     `lyrics` only for a file without its own; or {"error"} saying why it can't be read
 //   startAudioImport(base64 or "" for the pending recording, name, download, melodyOnly, detailed)
 //   storeSource(recordingId, source) -> bool   getSource(recordingId) -> source or null
 //   writeClipboard(text), readClipboard() -> text (system clipboard; throw on failure)
 //   lyricTokens(text, dictionaryJSON) -> string JSON {tokens:[strings]} (throw on failure)
 //   playSourceReview([{id, from, to, at}], loop) -> "" or error: stored recordings (seconds
 //     [from, to) of each, `at` seconds into the phrase; overlapping pieces are mixed)
-//   onStatus(cb)  (sync; cb gets {beats,bpm,playing,host,capture,rendering,error,songVersion,
-//     platform: "mac" | "windows" | "linux", importTypes: {audio: [extensions], score: [extensions]}})
+//   onStatus(cb)  (sync; cb gets {beats,bpm,playing,host,hostTempo,clock,capture,rendering,error,songVersion,
+//     platform: "mac" | "windows" | "linux", importTypes: {audio: [extensions], score: [extensions]}};
+//     hostTempo: the host gives its tempo with its beat position; clock: "beats" a DAW's beat position,
+//     "samples" a host's sample clock (MuseScore), "own" Novox's transport)
 //   hostSpace() -> bool: Space handed to the DAW's window as a key press
 //   isMock (bool)   starterSong (mock only: the song it starts with, see song-merge.js)
 
@@ -126,7 +130,8 @@ async function createNative() {
     hostLocate: async (seconds, fps) => { const r = await fn.hostLocate(+seconds, +fps || 0); return r && typeof r === "object" ? r : { sent: !!r }; },
     setMmcState: (works, offset, rate) => fn.setMmcState(!!works, +offset || 0, +rate || 0),
     setTempo: (bpm) => fn.setTempo(+bpm),
-    importFile: async (b64, lyrics) => asString(await fn.importFile(b64, lyrics || "")),
+    importFile: async (b64, lyrics, options) =>
+      asString(await fn.importFile(b64, lyrics || "", options && typeof options === "object" ? options : {})),
     playAudioReview: (...args) => fn.playAudioReview(...args),
     playSongReview: (...args) => fn.playSongReview(...args),
     playSourceReview: (pieces, loop) => fn.playSourceReview(pieces, !!loop),
@@ -208,35 +213,233 @@ function mockPlan(song, bpm) {
   return { lead: 0.05, length, syllables, segments: [], warnings };
 }
 
-// Tiny MusicXML reader so "Import" can be exercised without the engine.
-function mockParseMusicXml(text) {
-  const doc = new DOMParser().parseFromString(text, "application/xml");
-  if (doc.querySelector("parsererror") || !doc.querySelector("note")) return null;
-  const tempo = +(doc.querySelector("sound[tempo]")?.getAttribute("tempo")) || 100;
-  let divisions = 1, t = 0;
-  const notes = [];
-  const STEP = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
-  for (const el of doc.querySelectorAll("attributes > divisions, note")) {
-    if (el.tagName === "divisions") { divisions = +el.textContent || 1; continue; }
-    const beats = (+el.querySelector("duration")?.textContent || 0) / divisions;
-    if (el.querySelector("chord")) continue;
-    if (!el.querySelector("rest") && el.querySelector("pitch")) {
-      const step = el.querySelector("step").textContent.trim();
-      const alter = +(el.querySelector("alter")?.textContent || 0);
-      const oct = +el.querySelector("octave").textContent;
-      const lyr = el.querySelector("lyric");
-      let lyric;
-      if (lyr) {
-        const syl = lyr.querySelector("syllabic")?.textContent || "single";
-        lyric = (lyr.querySelector("text")?.textContent || "").trim() + (syl === "begin" || syl === "middle" ? "-" : "");
-      }
-      const n = { pitch: STEP[step] + alter + 12 * (oct + 1), start: t * 60 / tempo, dur: beats * 60 / tempo };
-      if (lyric) n.lyric = lyric;
-      notes.push(n);
-    }
-    t += beats;
+// ---------------------------------------------------------------------------
+// Mock import: an engine-like reader so Import can be exercised without the engine. Like the
+// plugin's importFile (novox_import in beats): a .mxl is unzipped, the file's own lyrics stay on
+// its notes (one syllable each, "_" holding a melisma) and the lyric line given comes back only
+// for a file without any; the result lists the parts and voices, the tempo map and the engine's
+// warnings. Unlike the engine it does not play out repeats (it reports them as the engine does, so
+// the editor's "Verse per repeat" can be tried); MIDI files give a fixed melody.
+
+// A small XML reader (elements, attributes, text) that needs no DOM, so node runs it too.
+function parseXml(text) {
+  const decode = (s) => s.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (_, e) => e[0] !== "#"
+    ? { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" }[e.toLowerCase()]
+    : String.fromCodePoint(/x/i.test(e[1]) ? parseInt(e.slice(2), 16) : +e.slice(1)));
+  const root = { name: "", attrs: {}, children: [], text: "" }, stack = [root];
+  const token = /<!--[\s\S]*?-->|<!\[CDATA\[([\s\S]*?)\]\]>|<[!?][^>]*>|<\/([^\s>]+)\s*>|<([^\s/>!?]+)([^>]*?)(\/?)>|([^<]+)/g;
+  for (const m of text.matchAll(token)) {
+    const top = stack[stack.length - 1];
+    if (m[1] !== undefined) top.text += m[1];
+    else if (m[2]) { if (stack.length > 1 && top.name === m[2]) stack.pop(); }
+    else if (m[3]) {
+      const el = { name: m[3], attrs: {}, children: [], text: "" };
+      for (const a of m[4].matchAll(/([^\s=]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) el.attrs[a[1]] = decode(a[2] ?? a[3]);
+      top.children.push(el);
+      if (!m[5]) stack.push(el);
+    } else if (m[6]) top.text += decode(m[6]);
   }
-  return { units: "seconds", tempo, notes };
+  return root;
+}
+const xmlKid = (el, name) => el?.children.find((c) => c.name === name);
+const xmlKids = (el, name) => (el ? el.children.filter((c) => c.name === name) : []);
+const xmlText = (el) => (el?.text || "").trim();
+
+// A partwise MusicXML file the way the engine reads it, without repeats: each part's notes
+// (beats from the start, a chord's top note, the measure), voices and lyrics by verse, the tempo
+// marks, the time signatures, the pickup's length, and whether there are repeats or jumps.
+function readMusicXml(text) {
+  const doc = parseXml(text), score = xmlKid(doc, "score-partwise");
+  if (!score) throw new Error(xmlKid(doc, "score-timewise") ? "timewise MusicXML isn't supported" : "unrecognized file: expected MIDI or MusicXML");
+  const STEP = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+  const names = new Map(xmlKids(xmlKid(score, "part-list"), "score-part").map((p) => [p.attrs.id, xmlText(xmlKid(p, "part-name"))]));
+  const tempos = new Map();  // beat -> bpm (<sound tempo>, from any part)
+  const meters = new Map();  // beat -> [beats, beatType] (from the first part)
+  let repeats = false, pickupBeats = 0;
+  const parts = xmlKids(score, "part").map((part, index) => {
+    let divisions = 1, barStart = 0, nominal = 0;
+    const notes = [];
+    xmlKids(part, "measure").forEach((measure, bar) => {
+      let at = barStart, end = barStart, lastStart = barStart;
+      for (const el of measure.children) {
+        const duration = () => (+xmlText(xmlKid(el, "duration")) || 0) / divisions;
+        if (el.name === "attributes") {
+          divisions = +xmlText(xmlKid(el, "divisions")) || divisions;
+          const time = xmlKid(el, "time"), beats = +xmlText(xmlKid(time, "beats")), type = +xmlText(xmlKid(time, "beat-type"));
+          if (beats > 0 && type > 0) { nominal = beats * 4 / type; if (index === 0) meters.set(barStart, [beats, type]); }
+        } else if (el.name === "barline") repeats ||= !!(xmlKid(el, "repeat") || xmlKid(el, "ending"));
+        else if (el.name === "backup") at -= duration();
+        else if (el.name === "forward") at += duration();
+        else if (el.name === "sound" || el.name === "direction") {
+          const sound = el.name === "sound" ? el : xmlKid(el, "sound");
+          if (+sound?.attrs.tempo > 0 && !tempos.has(at)) tempos.set(at, +sound.attrs.tempo);
+          repeats ||= ["dacapo", "dalsegno", "tocoda"].some((k) => sound?.attrs[k]);
+        } else if (el.name === "note" && !xmlKid(el, "grace")) {
+          const chord = !!xmlKid(el, "chord"), start = chord ? lastStart : at;
+          if (!chord) { lastStart = at; at += duration(); }
+          const pitch = xmlKid(el, "pitch");
+          if (pitch && !xmlKid(el, "rest") && !xmlKid(el, "cue")) {
+            const midi = STEP[xmlText(xmlKid(pitch, "step"))] + (+xmlText(xmlKid(pitch, "alter")) || 0) + 12 * (+xmlText(xmlKid(pitch, "octave")) + 1);
+            const voice = xmlText(xmlKid(el, "voice")) || "1", prev = notes[notes.length - 1];
+            if (chord && prev && prev.voice === voice && prev.start === start) { prev.pitch = Math.max(prev.pitch, midi); prev.chordNotes++; }
+            else {
+              const lyrics = {};
+              for (const l of xmlKids(el, "lyric")) {
+                const verse = +l.attrs.number || 1, syllabic = xmlText(xmlKid(l, "syllabic"));
+                // An elision (two <text>s, or "‿" in one) joins its syllables with the one-note mark.
+                const text = xmlKids(l, "text").map(xmlText).join("~").replace(/[\s ‿͜-~]+/g, "~");
+                if (!(verse in lyrics)) lyrics[verse] = { text: text.replace(/^~|~$/g, ""),
+                  continues: syllabic === "begin" || syllabic === "middle" };
+              }
+              notes.push({ start, dur: duration(), pitch: midi, voice, lyrics, chordNotes: 0, bar,
+                tieStop: xmlKids(el, "tie").some((t) => t.attrs.type === "stop") });
+            }
+          }
+        }
+        end = Math.max(end, at);
+      }
+      if (bar === 0 && index === 0 && measure.attrs.implicit === "yes" && end > 0 && (!nominal || end < nominal)) pickupBeats = end;
+      barStart = end;
+    });
+    return { index, id: part.attrs.id || "", name: names.get(part.attrs.id) || "", notes };
+  });
+  const timeSignatures = [...meters].sort((a, b) => a[0] - b[0]).map(([beat, [beats, beatType]]) => ({ beat, beats, beatType }));
+  return { parts, tempos: [...tempos].sort((a, b) => a[0] - b[0]), timeSignatures, repeats, pickupBeats };
+}
+
+// The import of one MusicXML part's voice and verse, as novox_import's JSON (units "beats").
+function mockMusicXmlImport(text, { lyrics = "", track = -1, partVoice = "", verse = 0 } = {}) {
+  const { parts, tempos, timeSignatures, repeats, pickupBeats } = readMusicXml(text);
+  const sungText = (n) => Object.values(n.lyrics).some((l) => l.text);
+  const info = parts.map((p) => {
+    const voices = [];
+    for (const n of p.notes) {
+      let v = voices.find((x) => x.voice === n.voice);
+      if (!v) voices.push(v = { voice: n.voice, notes: 0, lyrics: 0 });
+      v.notes++; v.lyrics += sungText(n) ? 1 : 0;
+    }
+    const verses = [...new Set(p.notes.flatMap((n) => Object.keys(n.lyrics).filter((k) => n.lyrics[k].text).map(Number)))].sort((a, b) => a - b);
+    return { index: p.index, id: p.id, name: p.name, notes: p.notes.length, lyrics: p.notes.filter(sungText).length, verses, voices };
+  });
+  let chosen = track;
+  if (chosen >= parts.length) throw new Error(`MusicXML part ${track} not found`);
+  if (chosen < 0) chosen = (info.find((p) => p.lyrics > 0) || info.find((p) => p.notes > 0))?.index ?? -1;
+  if (chosen < 0) throw new Error("MusicXML has no notes");
+  const part = info[chosen];
+  if (!part.notes) throw new Error(`MusicXML part ${chosen} has no notes`);
+  const warnings = [];
+  if (parts.length > 1 && track < 0) warnings.push(`MusicXML has ${parts.length} parts; using part ${chosen}${part.name ? ` (${part.name})` : ""} (choose with track)`);
+  let voice = String(partVoice || "");
+  if (voice && !part.voices.some((v) => v.voice === voice)) throw new Error(`MusicXML part ${chosen} has no voice ${voice}`);
+  // The first voice with lyrics, unless another has more than twice as many.
+  const most = Math.max(0, ...part.voices.map((v) => v.lyrics));
+  if (!voice) voice = (part.voices.find((v) => most > 0 && v.lyrics * 2 >= most) || part.voices[0]).voice;
+  const sungVerse = verse > 0 ? verse : 1;
+  // A measure without that verse but with others (a refrain printed once) sings the nearest below.
+  const versesIn = new Map();
+  for (const n of parts[chosen].notes) {
+    if (n.voice !== voice) continue;
+    const have = versesIn.get(n.bar) || new Set();
+    for (const v of Object.keys(n.lyrics)) have.add(+v);
+    versesIn.set(n.bar, have);
+  }
+  const verseIn = (bar) => {
+    const have = [...(versesIn.get(bar) || [])].sort((a, b) => a - b);
+    return !have.length || have.includes(sungVerse) ? sungVerse : [...have].reverse().find((v) => v < sungVerse) ?? have[0];
+  };
+  const notes = [];
+  let sung = false, chordNotes = 0, others = 0;
+  for (const n of parts[chosen].notes) {
+    if (n.voice !== voice) { others++; continue; }
+    chordNotes += n.chordNotes;
+    const l = n.lyrics[verseIn(n.bar)], prev = notes[notes.length - 1];
+    if (n.tieStop && !l?.text && prev && prev.pitch === n.pitch && Math.abs(prev.start + prev.dur - n.start) < 1e-6) { prev.dur = n.start + n.dur - prev.start; continue; }
+    const note = { pitch: n.pitch, start: n.start, dur: n.dur };
+    // A melisma: an untexted note straight after a sung one holds its syllable.
+    if (l?.text) { note.lyric = l.text + (l.continues ? "-" : ""); sung = true; }
+    else if (sung && prev && Math.abs(prev.start + prev.dur - n.start) < 1e-6) note.lyric = "_";
+    notes.push(note);
+  }
+  if (others) warnings.push(`${others} note(s) in other voices skipped (sang voice ${voice}; choose with partVoice)`);
+  if (chordNotes) warnings.push(`${chordNotes} chord note(s) dropped (kept the top note)`);
+  const result = { units: "beats", tempo: tempos[0]?.[1] || 120, notes };
+  if (sung) { if (lyrics) warnings.push("sang the file's own lyrics (the lyrics given were not used)"); }
+  else {
+    if (lyrics) { result.lyrics = lyrics; for (const n of notes) delete n.lyric; }
+    else warnings.push("no lyrics in the MusicXML; notes will hum");
+  }
+  const tempoMap = [];
+  for (const [beat, bpm] of tempos.length && tempos[0][0] === 0 ? tempos : [[0, tempos[0]?.[1] || 120], ...tempos]) {
+    const p = tempoMap[tempoMap.length - 1];
+    if (p && p.bpm === bpm) continue;
+    tempoMap.push({ beat, seconds: p ? p.seconds + (beat - p.beat) * 60 / p.bpm : 0, bpm });
+  }
+  result.import = { format: "musicxml", part: chosen, partVoice: voice, verse: verse > 0 ? verse : repeats ? 0 : 1, fileLyrics: sung,
+    repeats, unfolded: repeats, pickupBeats,
+    tempoMap, timeSignatures: timeSignatures.map((t) => ({ ...t, seconds: tempoMapSeconds(tempoMap, t.beat) })), parts: info };
+  if (warnings.length) result.importWarnings = warnings;
+  return result;
+}
+
+function tempoMapSeconds(map, beat) {
+  let p = map[0];
+  for (const t of map) { if (t.beat > beat) break; p = t; }
+  return p ? p.seconds + (beat - p.beat) * 60 / p.bpm : beat * 0.5;
+}
+
+// The fixed melody the mock imports from any MIDI file (in beats at 96 bpm, with lyric events).
+function mockMidiImport({ lyrics = "" } = {}) {
+  const notes = [["C4", 0, 1, "twin-"], ["C4", 1, 1, "kle"], ["G4", 2, 1, "twin-"], ["G4", 3, 1, "kle"],
+    ["A4", 4, 1, "lit-"], ["A4", 5, 1, "tle"], ["G4", 6, 2, "star"]].map(([pitch, start, dur, lyric]) => ({ pitch, start, dur, lyric }));
+  return { ...(lyrics ? { importWarnings: ["sang the file's own lyrics (the lyrics given were not used)"] } : {}),
+    import: { format: "midi", part: 0, partVoice: "", verse: 1, fileLyrics: true, repeats: false, unfolded: false, pickupBeats: 0,
+      tempoMap: [{ beat: 0, seconds: 0, bpm: 96 }], timeSignatures: [{ beat: 0, seconds: 0, beats: 4, beatType: 4 }],
+      parts: [{ index: 0, id: "", name: "Melody", notes: 7, lyrics: 7, verses: [1], voices: [] }] },
+    units: "beats", tempo: 96, notes };
+}
+
+// The entries of a zip file ({method, data} by name), from its central directory.
+function unzipEntries(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), files = new Map();
+  let end = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557) && end < 0; i--) if (view.getUint32(i, true) === 0x06054b50) end = i;
+  if (end < 0) throw new Error("This .mxl file is not a readable zip archive (compressed MusicXML)");
+  for (let at = view.getUint32(end + 16, true), k = view.getUint16(end + 10, true); k > 0 && view.getUint32(at, true) === 0x02014b50; k--) {
+    const nameLength = view.getUint16(at + 28, true), local = view.getUint32(at + 42, true);
+    const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
+    files.set(new TextDecoder().decode(bytes.subarray(at + 46, at + 46 + nameLength)),
+      { method: view.getUint16(at + 10, true), data: bytes.subarray(start, start + view.getUint32(at + 20, true)) });
+    at += 46 + nameLength + view.getUint16(at + 30, true) + view.getUint16(at + 32, true);
+  }
+  return files;
+}
+async function unzipText({ method, data }) {
+  if (method === 8) data = new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
+  else if (method !== 0) throw new Error("This .mxl file uses an unsupported compression");
+  return new TextDecoder().decode(data);
+}
+// The score in a .mxl file: the rootfile META-INF/container.xml names, else the first .musicxml/.xml.
+async function mxlScore(bytes) {
+  const files = unzipEntries(bytes), container = files.get("META-INF/container.xml");
+  const find = (el) => el.name === "rootfile" ? el : el.children.map(find).find(Boolean);
+  const path = container ? find(parseXml(await unzipText(container)))?.attrs["full-path"] : "";
+  const entry = files.get(path) || [...files].find(([name]) => !/^META-INF\//i.test(name) && /\.(musicxml|xml)$/i.test(name))?.[1];
+  if (!entry) throw new Error("This .mxl file holds no MusicXML score");
+  return unzipText(entry);
+}
+
+// What the mock's importFile answers for these file bytes: the score JSON, or {error}.
+export async function mockImportFile(bytes, lyrics = "", options = {}) {
+  const o = { lyrics: String(lyrics || ""), track: Number.isInteger(options?.track) ? options.track : -1,
+    partVoice: options?.partVoice == null ? "" : String(options.partVoice), verse: +options?.verse || 0 };
+  try {
+    const head = String.fromCharCode(...bytes.subarray(0, 4));
+    if (head === "MThd") return JSON.stringify(mockMidiImport(o));
+    const text = head.startsWith("PK") ? await mxlScore(bytes) : new TextDecoder().decode(bytes);
+    return JSON.stringify(mockMusicXmlImport(text, o));
+  } catch (e) {
+    return JSON.stringify({ error: String(e?.message || e) });
+  }
 }
 
 // A recording "converted" by the mock: a short sung phrase whose words and pitches depend on the
@@ -291,6 +494,13 @@ function createMock() {
   const mmcListens = params.get("mmc") === "1", mmcBias = +params.get("mmcBias") || 0;
   const mmcRate = +params.get("mmcRate") || 0, mmcLatency = +params.get("mmcLatency") || 0, frozen = params.get("frozen") === "1";
   const staleAudio = params.get("stale") === "1";
+  // ?notation=1: a notation app that gives plugins no beat position and calls them only while it
+  // plays (MuseScore 4): Novox follows its sample clock. Space (the key press it is handed) plays
+  // and stops it; with &lastcall=0 the status goes on saying "playing" after it stops, as the
+  // plugin's last block left it (MuseScore makes no last call). ?idle=1: a DAW that has not run the
+  // plugin yet (Logic, for a track it isn't playing): no beat position, no blocks.
+  const notation = !host && params.get("notation") === "1", noLastCall = params.get("lastcall") === "0";
+  const idle = !host && !notation && params.get("idle") === "1";
   let blocks = 0, mmcState = { works: false, offset: 0, rate: 0 };
   const later = (fn) => (mmcLatency ? setTimeout(fn, mmcLatency) : fn());
   // Audio imports convert straight away; open index.html?model=0 to see the model download dialog.
@@ -298,7 +508,7 @@ function createMock() {
   const sources = new Map();
   let importState = { state: "idle" }, importTimer = 0;
   let songJson = JSON.stringify(DEMO_SONG);
-  let bpm = 110, playing = false, capture = false, rendering = false, version = 1, beats = 0, cursor = 0;
+  let bpm = 110, playing = false, capture = false, rendering = false, version = 1, beats = 0, cursor = 0, stoppedAt = 0;
   let lastTick = performance.now(), renderTimer = 0, lastCapturedBeat = -1;
   const listeners = [];
   const log = (window.__mockLog = []);
@@ -325,14 +535,18 @@ function createMock() {
         songJson = JSON.stringify(s);
         version++;
       }
-      if (!host && !capture && beats > songEnd() + 4) { playing = false; beats = cursor; }
+      if (!host && !notation && !capture && beats > songEnd() + 4) { playing = false; beats = cursor; }
     }
-    if (host && (playing || !frozen)) blocks++;
+    if ((host && (playing || !frozen)) || (notation && playing)) blocks++;
     // ?stale=1: the audio stays at the first render (a render that never finishes).
-    const status = { beats, bpm, playing, host, capture, rendering, error: "", songVersion: version, version: "1.0 beta",
+    const status = { beats, bpm, playing: playing || (notation && noLastCall && stoppedAt > 0), host, capture, rendering, error: "", songVersion: version, version: "1.0 beta",
       renderedVersion: staleAudio ? 1 : version, renders: { started: version, cancelled: staleAudio ? version - 1 : 0, secondsSinceDone: 0.5 },
       platform, importTypes,
-      ...(host ? { daw: true, seconds: beats * 60 / bpm, blocks, hostName: "Mock DAW", mmc: { port: mmcPort, ...mmcState } } : {}) };
+      clock: host ? "beats" : notation ? "samples" : "own",
+      ...(host ? { daw: true, hostTempo: true, seconds: beats * 60 / bpm, blocks, hostName: "Mock DAW", mmc: { port: mmcPort, ...mmcState } } : {}),
+      ...(notation ? { daw: true, blocks, hostName: "Mock notation app", mmc: { port: mmcPort, ...mmcState },
+        ...(blocks ? { seconds: beats * 60 / bpm } : {}) } : {}),
+      ...(idle ? { daw: true, blocks: 0, hostName: "Mock DAW", mmc: { port: mmcPort, ...mmcState } } : {}) };
     for (const cb of listeners) cb(status);
   }, 33);
 
@@ -385,21 +599,19 @@ function createMock() {
     getVoices: () => delay([...MOCK_VOICES]),
     setCapture: (on) => { record("setCapture", on); capture = !!on; lastCapturedBeat = Math.floor(beats); return delay(undefined); },
     // Like the standalone app: Play starts from the top, Stop leaves the playhead where it stopped.
-    setTransport: (on) => { record("setTransport", on); if (!!on !== playing) beats = cursor; playing = !!on; lastCapturedBeat = -1; return delay(undefined); },
+    setTransport: (on) => {
+      record("setTransport", on);
+      if (notation || idle) return delay(undefined);  // the host's playback, not Novox's own, runs here
+      if (!!on !== playing) beats = cursor; playing = !!on; lastCapturedBeat = -1; return delay(undefined);
+    },
     setPlayhead: (b) => { record("setPlayhead", b); if (!host) cursor = beats = Math.max(0, +b || 0); return delay(undefined); },
-    setTempo: (v) => { record("setTempo", v); bpm = Math.min(300, Math.max(30, +v || 120)); return delay(undefined); },
-    importFile: (b64, lyrics) => {
-      record("importFile", { bytes: Math.floor((b64.length * 3) / 4), lyrics });
-      let text = "";
-      try { text = new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))); } catch {}
-      const parsed = /<score-partwise|<score-timewise/.test(text) ? mockParseMusicXml(text) : null;
-      const score = parsed || {
-        units: "seconds", tempo: 96,
-        notes: [["C4", 0, 0.625, "twin-"], ["C4", 0.625, 0.625, "kle"], ["G4", 1.25, 0.625, "twin-"], ["G4", 1.875, 0.625, "kle"],
-          ["A4", 2.5, 0.625, "lit-"], ["A4", 3.125, 0.625, "tle"], ["G4", 3.75, 1.25, "star"]]
-          .map(([pitch, start, dur, lyric]) => ({ pitch, start, dur, lyric })),
-      };
-      return delay(JSON.stringify(score), 60);
+    // The song's own tempo; a DAW (?host=1) plays at its own, as the plugin does when the host sends one.
+    setTempo: (v) => { record("setTempo", v); if (!host) bpm = Math.min(400, Math.max(20, +v || 120)); return delay(undefined); },
+    importFile: async (b64, lyrics, options) => {
+      record("importFile", { bytes: Math.floor((b64.length * 3) / 4), lyrics, options });
+      let bytes;
+      try { bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)); } catch { return delay(JSON.stringify({ error: "Could not decode the file" })); }
+      return delay(await mockImportFile(bytes, lyrics, options), 60);
     },
     starterSong: DEMO_SONG,
     audioImportStatus: () => delay({ ...importState, modelAvailable }),
@@ -420,7 +632,12 @@ function createMock() {
     onAudioFileDrop: () => {},
     // Recorders so the file buttons and window sizes can be checked in a browser.
     fileAction: (action) => { record("fileAction", action); return delay(""); },
-    hostSpace: () => { record("hostSpace"); if (host && spaceWorks) later(() => { playing = !playing; }); return delay(host && spaceWorks); },
+    hostSpace: () => {
+      record("hostSpace");
+      if (notation) { stoppedAt = playing ? performance.now() : 0; playing = !playing; return delay(true); }
+      if (host && spaceWorks) later(() => { playing = !playing; });
+      return delay(host && spaceWorks);
+    },
     hostTransport: (action) => { record("hostTransport", action); if (host && mmcPort && mmcListens) later(() => { playing = action === "play"; }); return delay(host && mmcPort); },
     hostLocate: (seconds, fps) => {
       record("hostLocate", seconds);

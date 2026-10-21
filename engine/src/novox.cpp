@@ -120,6 +120,7 @@ char* novox_import(novox_engine* e, const void* data, size_t size, const char* o
   }
   try {
     novox::ImportOptions opts;
+    opts.lexicon = &e->lexicon;  // tells MIDI verses apart where only some have a syllable
     std::string voice;
     if (options_json && *options_json) {
       novox::json::Value o = novox::json::parse(options_json);
@@ -127,25 +128,33 @@ char* novox_import(novox_engine* e, const void* data, size_t size, const char* o
       opts.lyrics = o.str("lyrics", "");
       opts.beats = o.str("units", "seconds") == "beats";
       voice = o.str("voice", "");
+      const auto& partVoice = o["partVoice"];  // MusicXML <voice> ids are text ("1"); a number is accepted too
+      if (partVoice.isString()) opts.partVoice = partVoice.string;
+      else if (partVoice.isNumber() && partVoice.number == std::floor(partVoice.number))
+        opts.partVoice = std::to_string(static_cast<long long>(partVoice.number));
+      else if (!partVoice.isNull()) throw std::runtime_error("partVoice must be a voice number");
+      const auto& verse = o["verse"];
+      if (!verse.isNull() && (!verse.isNumber() || verse.number < 0 || verse.number > 1000 ||
+                              verse.number != std::floor(verse.number)))
+        throw std::runtime_error("verse must be a whole number (1 = the first verse, 0 = one per repeat pass)");
+      opts.verse = static_cast<int>(o.num("verse", 0));
+      const auto& unfold = o["unfold"];
+      if (!unfold.isNull() && unfold.type != novox::json::Value::Type::Bool) throw std::runtime_error("unfold must be true or false");
+      if (!unfold.isNull()) opts.unfold = unfold.boolean;
     }
     const auto* bytes = static_cast<const uint8_t*>(data);
     std::vector<std::string> warnings;
-    novox::Score score = novox::importAny(std::vector<uint8_t>(bytes, bytes + size), opts, warnings);
+    novox::ImportInfo info;
+    novox::Score score = novox::importAny(std::vector<uint8_t>(bytes, bytes + size), opts, warnings, &info);
     if (!voice.empty()) score.voice.name = voice;
     std::string out = novox::scoreToJson(score, opts.beats);
+    std::string head = "  \"import\": " + novox::importInfoToJson(info) + ",\n";
     if (!warnings.empty()) {
       std::string w = "  \"importWarnings\": [";
-      for (size_t i = 0; i < warnings.size(); ++i) {
-        std::string esc;
-        for (char c : warnings[i]) {
-          if (c == '"' || c == '\\') esc += '\\';
-          esc += c;
-        }
-        w += (i ? ", \"" : "\"") + esc + "\"";
-      }
-      w += "],\n";
-      out.insert(out.find('\n') + 1, w);
+      for (size_t i = 0; i < warnings.size(); ++i) w += (i ? ", \"" : "\"") + novox::jsonEscape(warnings[i]) + "\"";
+      head = w + "],\n" + head;
     }
+    out.insert(out.find('\n') + 1, head);
     return dupString(out);
   } catch (const std::exception& ex) {
     e->error = ex.what();

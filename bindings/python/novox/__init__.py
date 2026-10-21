@@ -125,10 +125,17 @@ class Singer:
         if self._lib.novox_add_word(self._engine, word.encode(), arpabet.encode()):
             raise NovoxError(self._error())
 
-    def import_file(self, path, lyrics: str = "", track: int = -1, voice: str = "") -> dict:
-        """Read a MIDI or MusicXML file into a score dict (render it with render())."""
+    def import_file(self, path, lyrics: str = "", track: int = -1, voice: str = "", part_voice: str = "",
+                    verse: int = 0, unfold: bool = True) -> dict:
+        """Read a MIDI or MusicXML file into a score dict (render it with render()).
+        The file's own lyrics are sung when it has them; `lyrics` is for a file without any.
+        `track` picks the MIDI track / MusicXML part (default: the first with lyrics), `part_voice`
+        the MusicXML voice, `verse` one lyric verse (0: verse N on repeat pass N), and
+        `unfold=False` reads MusicXML repeats as written. What the file holds (parts, tempo map,
+        time signatures, pickup) is under "import"."""
         data = Path(path).read_bytes()
-        opts = json.dumps({"lyrics": lyrics, "track": track, **({"voice": voice} if voice else {})})
+        opts = json.dumps({"lyrics": lyrics, "track": track, "verse": verse, "unfold": unfold,
+                           **({"voice": voice} if voice else {}), **({"partVoice": part_voice} if part_voice else {})})
         return json.loads(self._take_string(self._lib.novox_import(self._engine, data, len(data), opts.encode())))
 
     def transcribe(self, samples, sample_rate: float, words=None, **options) -> dict:

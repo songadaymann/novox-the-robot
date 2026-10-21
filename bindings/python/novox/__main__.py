@@ -20,7 +20,7 @@ from . import NovoxError, Singer
 VOWELS = {"AA", "AE", "AH", "AO", "AW", "AX", "AY", "EH", "ER", "EY", "IH", "IY", "OW", "OY", "UH", "UW"}
 
 
-def _load_score(singer: Singer, path: str, lyrics: str, track: int) -> dict:
+def _load_score(singer: Singer, path: str, lyrics: str, track: int, **import_options) -> dict:
     data = Path(path).read_bytes()
     if data.lstrip()[:1] == b"{":
         text = "\n".join(l for l in data.decode("utf-8").splitlines() if not l.strip().startswith("//"))
@@ -28,7 +28,7 @@ def _load_score(singer: Singer, path: str, lyrics: str, track: int) -> dict:
         if lyrics:
             score["lyrics"] = lyrics
         return score
-    score = singer.import_file(path, lyrics=lyrics, track=track)
+    score = singer.import_file(path, lyrics=lyrics, track=track, **import_options)
     for w in score.pop("importWarnings", []):
         print(f"note: {w}", file=sys.stderr)
     return score
@@ -37,6 +37,11 @@ def _load_score(singer: Singer, path: str, lyrics: str, track: int) -> dict:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="novox", description="Novox The Robot: formant singing synthesizer")
     sub = ap.add_subparsers(dest="cmd", required=True)
+
+    def imports(p):
+        p.add_argument("--part-voice", default="", help="MusicXML voice to sing (default: the one with lyrics)")
+        p.add_argument("--verse", type=int, default=0, help="lyric verse (default: verse N on repeat pass N)")
+        p.add_argument("--no-unfold", action="store_true", help="read MusicXML repeats as written")
 
     def common(p):
         p.add_argument("--voice", default="", help="voice preset (see `novox voices`)")
@@ -48,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-o", "--out", default="out.wav")
     p.add_argument("--lyrics", default="")
     p.add_argument("--track", type=int, default=-1)
+    imports(p)
     common(p)
 
     p = sub.add_parser("say", help="sing words on one pitch (quick check)")
@@ -63,12 +69,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-o", "--out", default="")
     p.add_argument("--lyrics", default="")
     p.add_argument("--track", type=int, default=-1)
+    imports(p)
     common(p)
 
     p = sub.add_parser("plan", help="print the syllable/phoneme timeline as JSON")
     p.add_argument("input")
     p.add_argument("--lyrics", default="")
     p.add_argument("--track", type=int, default=-1)
+    imports(p)
     common(p)
 
     p = sub.add_parser("phonemes", help="show how words are pronounced")
@@ -94,7 +102,8 @@ def main(argv: list[str] | None = None) -> int:
             singer.save_wav(args.out, audio)
             print(f"wrote {args.out} ({len(audio) / args.rate:.2f} s)", file=sys.stderr)
         else:
-            score = _load_score(singer, args.input, args.lyrics, args.track)
+            score = _load_score(singer, args.input, args.lyrics, args.track, part_voice=args.part_voice,
+                                verse=args.verse, unfold=not args.no_unfold)
             if args.voice:
                 score["voice"] = args.voice
             if args.cmd == "import":

@@ -144,6 +144,7 @@ void usage() {
                "  novox render <score.json|song.mid|song.musicxml> -o <out.wav> [--voice NAME] [--rate HZ]\n"
                "             [--lyrics \"hel-lo world\"] [--track N]\n"
                "  novox import <song.mid|song.musicxml> [-o score.json] [--lyrics ...] [--track N]\n"
+               "             [--part-voice V] [--verse N] [--no-unfold]  (MusicXML voice, lyric verse, repeats as written)\n"
                "  novox plan <score.json|song.mid|song.musicxml>\n"
                "  novox transcribe <take.wav> [-o score.json] [--words words.json] [--algorithm legacy|singing-v1|singing-v2]\n"
                "             [--detail natural|detailed]  (singing-v2: also split held approaches, grace notes, droops)\n"
@@ -164,8 +165,9 @@ int main(int argc, char** argv) {
   std::string cmd = argv[1];
   std::string input, out = "out.wav", voice, dict, pitch = "C4", lyrics, wordsPath, algorithm = "legacy", detail = "natural";
   double rate = 48000, beats = 1, tempo = 100;
-  int track = -1;
-  bool outGiven = false;
+  std::string partVoice;
+  int track = -1, verse = 0;
+  bool outGiven = false, unfold = true;
   for (int i = 2; i < argc; ++i) {
     std::string a = argv[i];
     auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : ""; };
@@ -174,6 +176,9 @@ int main(int argc, char** argv) {
       outGiven = true;
     } else if (a == "--lyrics") lyrics = next();
     else if (a == "--track") track = std::atoi(next().c_str());
+    else if (a == "--part-voice") partVoice = next();
+    else if (a == "--verse") verse = std::atoi(next().c_str());
+    else if (a == "--no-unfold") unfold = false;
     else if (a == "--algorithm") algorithm = next();
     else if (a == "--detail") detail = next();
     else if (a == "--words") wordsPath = next();
@@ -263,7 +268,11 @@ int main(int argc, char** argv) {
       size_t first = score.find_first_not_of(" \t\r\n");
       bool isJson = first != std::string::npos && score[first] == '{';
       if (!isJson || cmd == "import") {
-        std::string opts = "{\"track\": " + std::to_string(track) + ", \"lyrics\": \"" + jsonEscape(lyrics) + "\"}";
+        std::string opts = "{\"track\": " + std::to_string(track) + ", \"lyrics\": \"" + jsonEscape(lyrics) +
+                           "\", \"verse\": " + std::to_string(std::max(0, verse)) +
+                           ", \"unfold\": " + (unfold ? "true" : "false");
+        if (!partVoice.empty()) opts += ", \"partVoice\": \"" + jsonEscape(partVoice) + "\"";
+        opts += "}";
         char* imported = novox_import(e, score.data(), score.size(), opts.c_str());
         if (!imported) {
           std::cerr << "error: " << novox_last_error(e) << "\n";

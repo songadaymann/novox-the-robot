@@ -599,8 +599,23 @@ els.download.onclick = async () => {
 
 // ---------------------------------------------------------------------------
 // MIDI / MusicXML import
+const VOWELS = new Set(["IY", "IH", "EH", "AE", "AA", "AO", "UH", "UW", "AH", "AX", "ER", "EY", "AY", "AW", "OW", "OY"]);
+// The file's lyrics as a line that flows back one syllable per note: "hel-" "lo" joins as "hel-lo",
+// and a one-note word the flow would split by its vowels gets the one-note mark ("fire~").
+function lyricLine(words) {
+  let open = false;  // the last syllable left its word open ("hel-")
+  return words.map((w) => {
+    if (w === "_") return w;
+    const fresh = !open && !w.endsWith("-") && !w.includes("~") && !w.startsWith("{");
+    open = w.endsWith("-");
+    const vowels = fresh ? singer.phonemize(w).split(/\s+/).filter((p) => VOWELS.has(p)).length : 0;
+    return vowels > 1 ? w + "~" : w;
+  }).join(" ").replace(/- /g, "-");
+}
 function applyImported(score, fileName) {
-  const tempo = Math.round(score.tempo || 120);
+  // The file's first tempo, unrounded (66.67 stays 66.67): placing notes by time at a rounded tempo
+  // would drift from the score.
+  const tempo = +score.tempo > 0 ? +score.tempo : 120;
   const toBeats = (sec) => (score.units === "seconds" ? (sec * tempo) / 60 : sec);
   const notes = [...score.notes].map((n) => (typeof n === "string" ? null : n)).filter(Boolean);
   let t = 0;
@@ -617,11 +632,8 @@ function applyImported(score, fileName) {
     else if (words.length) words.push("_"); // keep later lyrics aligned
   }
   if (!toks.length) throw new Error("No notes found in that file.");
-  // Rejoin "hel-" "lo" into "hel-lo" so the lyric box reads naturally.
-  if (words.some((w) => w !== "_")) {
-    els.lyrics.value = words.join(" ").replace(/- /g, "-");
-  }
-  els.tempo.value = tempo;
+  if (words.some((w) => w !== "_")) els.lyrics.value = lyricLine(words);
+  els.tempo.value = fmtNum(tempo);
   els.notes.value = formatNotes(toks);
   const opt = [...els.song.options].find((o) => o.value === "custom");
   opt.textContent = `Custom (from ${fileName})`;
@@ -633,7 +645,12 @@ async function importBytes(bytes, fileName) {
   try {
     const score = singer.importFile(bytes);
     applyImported(score, fileName);
-    if (!playing && !current.error) lcd("IMPORTED", `${fileName} · ${current.notes.length} notes`);
+    // The importer's warnings (other parts and voices, tempo changes...): the first on the LCD, all in its tooltip.
+    const warnings = (Array.isArray(score.importWarnings) ? score.importWarnings : []).map((w) => String(w).replace(/\s*\(choose with \w+\)|;\s*choose with \w+/g, ""));
+    const changes = Array.isArray(score.import?.tempoMap) && score.import.tempoMap.length > 1;
+    if (changes) warnings.unshift(`the tempo changes: notes are placed by time at the first tempo, ${fmtNum(+score.tempo)} bpm`);
+    els.lcd.title = warnings.join("\n");
+    if (!playing && !current.error) lcd("IMPORTED", warnings.length ? `${fileName} · ${warnings[0]}` : `${fileName} · ${current.notes.length} notes`);
   } catch (e) {
     lcd("COULDN'T READ FILE", `${fileName}: ${e.message}`, true);
   }

@@ -66,6 +66,12 @@ class NovoxProcessor : public juce::AudioProcessor, private juce::Timer {
   // MMC state), left out of a .novox file.
   void writeState(juce::MemoryBlock& destData, bool withProject);
 
+  // The host is MuseScore (by its path): it runs instruments only while it plays, and before 4.7
+  // sends no playing flag, so the plugin follows its sample clock while its blocks carry on from one
+  // another (status.clock "samples"). Set when the plugin is made; tests set it.
+  static bool hostIsMuseScore();
+  void setNotationHost(bool museScore);
+
   // A plugin in a DAW (not the standalone app or a test host), and its MMC port to the DAW's
   // transport (HostMmc; null when none could be opened).
   bool inDaw() const { return wrapperType != wrapperType_Standalone && wrapperType != wrapperType_Undefined; }
@@ -91,7 +97,14 @@ class NovoxProcessor : public juce::AudioProcessor, private juce::Timer {
   juce::String lyricTokens(const juce::String& text, const juce::String& dictionaryJson, juce::String& error) {
     return engine_->lyricTokens(text, dictionaryJson, error);
   }
-  juce::String importFile(const juce::MemoryBlock& data, const juce::String& lyrics, juce::String& error);
+  // A MIDI, MusicXML or compressed MusicXML (.mxl) file as the engine's score JSON in beats.
+  // `lyrics` is sung only by a file without its own; `choice` is the editor's {track, partVoice,
+  // verse} (plugin/ui/score-import.js). Empty with `error` set when the file can't be read.
+  juce::String importFile(const juce::MemoryBlock& data, const juce::String& lyrics, juce::String& error,
+                          const juce::var& choice = {});
+  // The score inside a compressed MusicXML file: the rootfile its META-INF/container.xml names,
+  // else the first .musicxml or .xml outside META-INF. Empty with `error` set otherwise.
+  static juce::MemoryBlock musicXmlFromMxl(const juce::MemoryBlock& zip, juce::String& error);
   bool auditionAudio(const juce::MemoryBlock&, juce::String& error, double start = 0, double end = -1, bool loop = false);
   bool auditionSong(double startBeat, double endBeat, bool loop, juce::String& error);
   // The newest song version represented by the audio (-1 before the first render).
@@ -127,6 +140,12 @@ class NovoxProcessor : public juce::AudioProcessor, private juce::Timer {
     double bpm = 120;
     bool playing = false;
     bool hostTransport = false;  // false in the standalone app (internal transport)
+    bool hostTempo = false;      // the host gives its tempo with its beat position (a DAW; maybe not Dorico)
+    // What the playhead follows: "beats", the host's beat position (a DAW); "samples", the host's
+    // sample clock at the song's tempo while a VST3 host that gives no beat position plays (and
+    // MuseScore 4 throughout, which calls the plugin only then); "own", Novox's own transport (the
+    // standalone app, or a host that has not called it yet or doesn't play).
+    const char* clock = "own";
     bool capture = false;
     bool rendering = false;
     juce::String error;       // last render error, if any
@@ -205,6 +224,18 @@ class NovoxProcessor : public juce::AudioProcessor, private juce::Timer {
   std::atomic<double> editOrigin_{NAN};
   std::atomic<bool> playing_{false};
   std::atomic<bool> hostTransport_{false};
+  std::atomic<bool> hostTempo_{false};
+  std::atomic<int> clock_{0};  // Status::clock: 0 own, 1 beats, 2 samples
+  std::atomic<bool> museScore_{false};
+  // Audio thread: the host has given a beat position (a DAW: its sample clock is never followed),
+  // it has said it plays (its playing flag is trusted), and its sample clock: the last position,
+  // the samples played since it last changed, and where the next block carries on (-1: unknown).
+  bool hostGavePpq_ = false, hostFlagsPlaying_ = false;
+  long long sampleClockLast_ = -1, sampleClockSame_ = 0, sampleClockNext_ = -1;
+  // Message thread: processBlock calls seen, and when they last changed.
+  static constexpr double kHostGoneMs = 200;
+  uint32_t blocksSeen_ = 0;
+  double blocksSeenAt_ = 0;
   std::atomic<bool> previewPlaying_{false};
   std::atomic<double> previewBpm_{120};
   double previewSamples_ = 0;  // audio thread

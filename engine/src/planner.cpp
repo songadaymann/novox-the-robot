@@ -119,11 +119,33 @@ std::string pronString(const Pronunciation& p) {
 
 // A word containing this mark is sung on one note ("wanna~" or "wan~na": two
 // syllables slurred together, like LilyPond's lyric tie). Without it a word
-// takes one note per vowel. The mark is dropped from the note's lyric; a lone
-// mark leaves its note without a lyric (a hum, or the end of the word before).
+// takes one note per vowel. The mark is dropped from the note's lyric, except
+// between whole words ("grace~and", an elision; see joinedWords); a lone mark
+// leaves its note without a lyric (a hum, or the end of the word before).
 constexpr char kOneNoteMark = '~';
 
 bool isHold(const std::string& t) { return t == "_" || t == "+"; }
+
+// A one-note lyric that joins whole words, as an elision does ("grace~and"): the
+// words' pronunciations one after another, when each is in the dictionary and
+// the joined word is not. Empty otherwise ("wan~na" and "fire~" are words).
+Pronunciation joinedWords(const std::string& text, const Lexicon& lex) {
+  if (text.find(kOneNoteMark) == std::string::npos) return {};
+  bool known = true;
+  lex.lookup(text, &known);
+  if (known) return {};
+  Pronunciation out;
+  int words = 0;
+  std::stringstream parts(text);
+  for (std::string part; std::getline(parts, part, kOneNoteMark);) {
+    if (Lexicon::normalize(part).empty()) continue;
+    const Pronunciation p = lex.lookup(part, &known);
+    if (!known) return {};
+    out.insert(out.end(), p.begin(), p.end());
+    ++words;
+  }
+  return words > 1 ? out : Pronunciation{};
+}
 
 }  // namespace
 
@@ -132,7 +154,8 @@ std::vector<std::string> lyricFlowTokens(const std::string& line, const Lexicon&
   for (const auto& tok : tokenizeLyrics(line)) {
     if (!isExplicit(tok) && tok.find(kOneNoteMark) != std::string::npos) {
       std::string one = tok;
-      one.erase(std::remove(one.begin(), one.end(), kOneNoteMark), one.end());
+      // Joined words keep their marks, so each is said as itself ("grace~and").
+      if (joinedWords(tok, lex).empty()) one.erase(std::remove(one.begin(), one.end(), kOneNoteMark), one.end());
       tokens.push_back(one);
       continue;
     }
@@ -211,6 +234,8 @@ std::vector<Syl> buildSyllables(const std::vector<Note>& notes, const Lexicon& l
       Pronunciation p;
       if (Lexicon::normalize(whole).empty()) {
         p = {{"M", -1}};  // no lyric: hum, like the original Virtual Singer
+      } else if (Pronunciation words = joinedWords(whole, lex); !words.empty()) {
+        p = std::move(words);  // an elision: both words' vowels on the note
       } else {
         bool known = true;
         p = lex.lookup(whole, &known);

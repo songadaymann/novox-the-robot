@@ -101,6 +101,15 @@
     <span id="singMessage"></span> <meter id="singLevel" min="0" max="0.2" value="0" aria-label="Microphone level"></meter>
     <button class="gel white small" id="singCancel">Cancel</button>
   </div>
+  <!-- After a MIDI or MusicXML import with several parts, voices or verses: sing another. -->
+  <div id="importBar" class="capture-help importbar" role="group" aria-labelledby="importLead" hidden>
+    <span id="importLead">Sing another part of <b id="importName"></b>:</span>
+    <label>Part <select id="importPart" class="popup" title="The part (MIDI track) to sing; the file is imported again"></select></label>
+    <label>Voice <select id="importVoice" class="popup" title="The voice within the part to sing"></select></label>
+    <label>Verse <select id="importVerse" class="popup" title="The lyric verse to sing; Verse per repeat sings verse 2 on the second time through"></select></label>
+    <span class="grow"></span>
+    <button class="gel white small" id="importDone">Done</button>
+  </div>
 
   <div class="body">
     <main class="main">

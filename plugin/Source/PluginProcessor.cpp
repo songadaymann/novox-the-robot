@@ -111,6 +111,7 @@ NovoxProcessor::NovoxProcessor()
     : juce::AudioProcessor(BusesProperties().withOutput("Output", juce::AudioChannelSet::stereo(), true)),
       engine_(SharedEngine::get()) {
   heldSince_.fill(-1.0);
+  setNotationHost(wrapperType == wrapperType_VST3 && hostIsMuseScore());
   song_ = Song::defaultSong();
   worker_ = std::make_unique<RenderThread>([this] { renderWorker(); });
   // Edits depend on this result immediately. macOS maps low to utility QoS, which can
@@ -132,6 +133,16 @@ NovoxProcessor::~NovoxProcessor() {
   worker_->signalThreadShouldExit();
   renderRequested_.signal();
   worker_->stopThread(5000);
+}
+
+bool NovoxProcessor::hostIsMuseScore() {
+  const auto path = juce::PluginHostType::getHostPath();
+  return path.containsIgnoreCase("MuseScore") || juce::File(path).getFileName().startsWithIgnoreCase("mscore");
+}
+
+void NovoxProcessor::setNotationHost(bool museScore) {
+  museScore_ = museScore;
+  if (!hostTransport_.load()) clock_ = museScore ? 2 : 0;
 }
 
 bool NovoxProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const {
@@ -156,17 +167,21 @@ void NovoxProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
   buffer.clear();
 
   // Where are we? Prefer the host transport; fall back to our own (standalone app).
-  bool playing = false, host = false;
+  bool playing = false, host = false, samplesClock = false, hostTempo = false;
   double beats = 0, bpm = previewBpm_.load(), hostSeconds = NAN, origin = NAN;
   juce::Optional<int64_t> hostSamples;
   if (auto* ph = getPlayHead()) {
     if (auto pos = ph->getPosition()) {
       if (auto ppq = pos->getPpqPosition()) {
         host = true;
+        hostGavePpq_ = true;
         hostSamples = pos->getTimeInSamples();
         beats = *ppq;
         playing = pos->getIsPlaying();
-        if (auto b = pos->getBpm()) bpm = *b;
+        if (auto b = pos->getBpm()) {
+          bpm = *b;
+          hostTempo = true;
+        }
         // Seconds paired with ppq let imports place timestamped audio on the host timeline.
         if (auto t = pos->getTimeInSeconds()) hostSeconds = *t;
         if (auto o = pos->getEditOriginTime()) origin = *o;
@@ -176,16 +191,52 @@ void NovoxProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
           const bool untold = wrapperType == wrapperType_AudioUnit && f->getBaseRate() == 24 && !f->isDrop() && !f->isPullDown();
           hostFrameRate_ = untold ? 0 : f->getBaseRate() | (f->isDrop() ? 1 << 8 : 0) | (f->isPullDown() ? 1 << 9 : 0);
         }
+      } else if (const auto at = pos->getTimeInSamples(); at && wrapperType == wrapperType_VST3 && !hostGavePpq_) {
+        // A VST3 host with no beat position (MuseScore 4 sends only its sample position, from 4.7
+        // a playing flag, and calls instruments only while it plays): while it plays, follow its
+        // sample clock, seconds from its start at the song's own tempo. JUCE fills in a sample time
+        // and a playing flag even for a host that sends neither, so a host plays when it says so
+        // (one that has ever said so is trusted from then on), or, MuseScore before 4.7, while its
+        // blocks carry on from one another. 4.6 gives a block the position of its end in whole
+        // microseconds (each block counted a little short), and the parts of a block split at note
+        // events the same one: a position a few samples from where the last block ended, or the
+        // last one again, carries on, and Novox keeps its own count there, a sample nearer the
+        // host's whenever they drift apart. Any other host keeps Novox's own transport while it
+        // doesn't play, as before (a host whose clock runs while stopped would otherwise play the
+        // song). Not for AU: JUCE gives a host without transport callbacks (auval, live-audio apps)
+        // a free-running clock.
+        if (pos->getIsPlaying()) hostFlagsPlaying_ = true;
+        const long long tolerance = std::max(16, n / 8), split = std::max(4096LL, 4LL * n);
+        const bool again = *at == sampleClockLast_;
+        const bool carriesOn = sampleClockNext_ >= 0 && (std::llabs(*at - sampleClockNext_) <= tolerance ||
+                                                         (again && sampleClockSame_ < split));
+        const bool follows = hostFlagsPlaying_ ? pos->getIsPlaying() : museScore_.load() && carriesOn;
+        const long long drift = again ? 0 : *at - sampleClockNext_;
+        const long long position = follows && carriesOn ? sampleClockNext_ + (drift > 8 ? 1 : drift < -8 ? -1 : 0)
+                                                        : static_cast<long long>(*at);
+        sampleClockSame_ = (again ? sampleClockSame_ : 0) + n;
+        sampleClockLast_ = *at;
+        sampleClockNext_ = position + n;
+        if (follows) {
+          samplesClock = playing = true;
+          hostSamples = position;
+          hostSeconds = static_cast<double>(position) / sr;
+          beats = hostSeconds * bpm / 60.0;
+        }
       }
     }
   }
-  if (!host) {
+  if (!host && !samplesClock) {
     playing = previewPlaying_.load();
     if (const double seek = previewSeek_.exchange(-1); seek >= 0) previewSamples_ = seek * 60.0 / bpm * sr;
     beats = previewSamples_ / sr * bpm / 60.0;
     if (playing) previewSamples_ += n;
   }
   hostTransport_ = host;
+  hostTempo_ = hostTempo;
+  // MuseScore keeps "samples" while stopped: it doesn't call the plugin then, so Novox's own
+  // transport can't play there.
+  clock_ = host ? 1 : samplesClock || (museScore_.load() && !hostGavePpq_) ? 2 : 0;
   playing_ = playing;
   playheadBeats_ = beats;
   blocks_.fetch_add(1, std::memory_order_relaxed);
@@ -313,15 +364,32 @@ void NovoxProcessor::timerCallback() {
     requestRender();
   }
 
-  // Tempo or sample-rate change -> re-render.
+  // A host followed by its sample clock that stops calling the plugin (MuseScore, stopped: it makes
+  // no last call) leaves `playing` as its last block set it. Not playing once no block has come for
+  // a while: note previews and Compare sound again, and renders can be cancelled.
+  {
+    const auto blocks = blocks_.load(std::memory_order_relaxed);
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    if (blocks != blocksSeen_) {
+      blocksSeen_ = blocks;
+      blocksSeenAt_ = now;
+    } else if (clock_.load() == 2 && playing_.load() && now - blocksSeenAt_ > kHostGoneMs) {
+      playing_ = false;
+    }
+  }
+
+  // Tempo or sample-rate change -> re-render. Without a host tempo the song's own is the one
+  // rendered (as renderWorker does): a host that isn't calling the plugin (MuseScore while
+  // stopped) leaves hostBpm_ where it was, and must not keep a changed tempo re-rendering.
   {
     std::shared_ptr<const Rendered> r;
     {
       const juce::SpinLock::ScopedLockType lock(renderedLock_);
       r = rendered_;
     }
+    const double bpm = hostTransport_.load() ? hostBpm_.load() : previewBpm_.load();
     if (r && !rendering_ &&
-        (std::abs(r->bpm - hostBpm_.load()) > 0.005 || std::abs(r->sampleRate - sampleRate_.load()) > 0.5)) {
+        (std::abs(r->bpm - bpm) > 0.005 || std::abs(r->sampleRate - sampleRate_.load()) > 0.5)) {
       requestRender();
     }
   }
@@ -474,11 +542,75 @@ juce::String NovoxProcessor::planSongJson(const juce::String& songJson, double b
 }
 
 juce::String NovoxProcessor::importFile(const juce::MemoryBlock& data, const juce::String& lyrics,
-                                      juce::String& error) {
+                                      juce::String& error, const juce::var& choice) {
+  error.clear();
+  juce::MemoryBlock xml;
+  const bool zipped = data.getSize() >= 2 && data[0] == 'P' && data[1] == 'K';
+  if (zipped) {
+    xml = musicXmlFromMxl(data, error);
+    if (xml.isEmpty()) return {};
+  }
   auto* o = new juce::DynamicObject();
   o->setProperty("lyrics", lyrics);
   o->setProperty("units", "beats");  // keep a region's bar position exact, whatever its tempo map
-  return engine_->importFile(data, juce::JSON::toString(juce::var(o)), error);
+  // The part (MIDI track), voice and verse chosen in the editor; the engine checks them.
+  for (const auto* key : {"track", "partVoice", "verse"})
+    if (choice.hasProperty(key)) o->setProperty(key, choice[key]);
+  return engine_->importFile(zipped ? xml : data, juce::JSON::toString(juce::var(o)), error);
+}
+
+juce::MemoryBlock NovoxProcessor::musicXmlFromMxl(const juce::MemoryBlock& zip, juce::String& error) {
+  constexpr juce::int64 maxXml = 64 * 1024 * 1024;  // the editor's import limit, uncompressed
+  juce::MemoryInputStream in(zip, false);
+  juce::ZipFile files(in);
+  const auto read = [&files, &error](const juce::ZipFile::ZipEntry* entry) {
+    juce::MemoryBlock out;
+    if (entry == nullptr) return out;
+    if (entry->uncompressedSize > maxXml) { error = "The score in this .mxl file is larger than 64 MB"; return out; }
+    std::unique_ptr<juce::InputStream> stream(files.createStreamForEntry(*entry));
+    bool ok = stream != nullptr;
+    if (ok) {
+      juce::MemoryOutputStream bytes(out, false);
+      ok = bytes.writeFromInputStream(*stream, maxXml + 1) <= maxXml;
+    }
+    if (!ok) {
+      error = "Could not unpack " + entry->filename + " from the .mxl file";
+      out.reset();
+    }
+    return out;
+  };
+  if (files.getNumEntries() == 0) {
+    error = "This .mxl file is not a readable zip archive (compressed MusicXML)";
+    return {};
+  }
+  // META-INF/container.xml names the score: its first <rootfile full-path="...">.
+  juce::String path;
+  if (const auto container = read(files.getEntry("META-INF/container.xml", true)); !container.isEmpty()) {
+    if (const auto xml = juce::parseXML(container.toString())) {
+      std::function<const juce::XmlElement*(const juce::XmlElement&)> rootfile = [&](const juce::XmlElement& e) -> const juce::XmlElement* {
+        if (e.getTagNameWithoutNamespace() == "rootfile") return &e;
+        for (const auto* child : e.getChildIterator())
+          if (const auto* found = rootfile(*child)) return found;
+        return nullptr;
+      };
+      if (const auto* found = rootfile(*xml)) path = found->getStringAttribute("full-path").trimCharactersAtStart("/");
+    }
+  }
+  error.clear();
+  const juce::ZipFile::ZipEntry* score = path.isNotEmpty() ? files.getEntry(path, true) : nullptr;
+  for (int i = 0; score == nullptr && i < files.getNumEntries(); ++i) {
+    const auto* entry = files.getEntry(i);
+    const auto name = entry->filename.toLowerCase();
+    if (!name.startsWith("meta-inf/") && !name.endsWith("/") && (name.endsWith(".musicxml") || name.endsWith(".xml")))
+      score = entry;
+  }
+  if (score == nullptr) {
+    error = "This .mxl file holds no MusicXML score";
+    return {};
+  }
+  auto xml = read(score);
+  if (xml.isEmpty() && error.isEmpty()) error = "The score in this .mxl file is empty";
+  return xml;
 }
 
 void NovoxProcessor::setPreviewPlaying(bool playing) {
@@ -505,6 +637,9 @@ NovoxProcessor::Status NovoxProcessor::getStatus() const {
   s.bpm = hostTransport_.load() ? hostBpm_.load() : previewBpm_.load();
   s.playing = playing_.load();
   s.hostTransport = hostTransport_.load();
+  s.hostTempo = hostTempo_.load();
+  static const char* const clocks[] = {"own", "beats", "samples"};
+  s.clock = clocks[juce::jlimit(0, 2, clock_.load())];
   s.capture = captureArmed_.load();
   s.rendering = rendering_.load();
   s.songVersion = songVersion_.load();

@@ -1,6 +1,7 @@
-# Hosts: Pro Tools, Ableton Live, Logic, Windows
+# Hosts: Pro Tools, Ableton Live, Logic, Windows, MuseScore, Dorico
 
-How the plugin gets into each DAW, and what still needs testing there. Last checked 2026-10-17.
+How the plugin gets into each DAW or notation app, and what still needs testing there. Last
+checked 2026-10-21.
 
 | Host | Format | Status |
 |---|---|---|
@@ -8,6 +9,8 @@ How the plugin gets into each DAW, and what still needs testing there. Last chec
 | Ableton Live | AU or VST3 | Not tested yet; checklist below |
 | Pro Tools | AAX (optional build) | Not released: builds, never loaded in Pro Tools, unsigned |
 | Windows DAWs | VST3 (64-bit) | Built by CI; not yet tested in a Windows DAW. See [Windows](#windows) |
+| MuseScore Studio 4 | VST3 only | Not tested live: follows its sample clock (headless tests only); checklist below |
+| Dorico 5/6 (Pro, Elements, SE) | VST3 only | Not tested live; checklist below |
 
 Releases (`scripts/package-mac.sh`, songaday.studio/plugins) ship the app, the AU (`Nvox` only) and
 the VST3. Pro Tools is left out: an AAX that loads in retail Pro Tools needs Avid's developer
@@ -254,3 +257,89 @@ To test in a Windows DAW, run the Ableton Live checklist above with the VST3, pl
 while the editor has focus, typing lyrics and Ctrl+Z/C/V (some DAWs take keys before plugins do),
 dragging WAV and MIDI out of the editor into a track, and two DAWs open with the editor showing at
 the same time.
+
+## MuseScore and Dorico (notation apps)
+
+The user steps are in the README ("Using Novox with MuseScore and Dorico"): export MusicXML
+(`.mxl` or `.musicxml`), import it into Novox, and load the **VST3** on the vocal staff. Neither
+app hosts AU, and neither passes lyrics to a plugin (MuseScore sends them only to its own Muse
+Sounds libraries), so the words always come from the imported file.
+
+**MusicXML in the plugin.** The editor imports through `NovoxProcessor::importFile`: a `.mxl` is
+unzipped with `juce::ZipFile` (the first `<rootfile full-path>` in `META-INF/container.xml`, else
+the first `.musicxml`/`.xml` outside `META-INF`) and the engine reads the score in beats
+(`units: "beats"`). `plugin/ui/score-import.js` then keeps the file's lyrics on its notes, one
+syllable each (`useNoteLyrics`), offers the parts, voices and verses the engine lists
+(`"import".parts`) in the import bar and imports again with `{track, partVoice, verse}`, and
+shows the engine's errors and `importWarnings` on the LCD. A score whose tempo changes is placed
+by time at its first tempo (from the `"import".tempoMap`), and the song's tempo is that first
+tempo, unrounded (66.67 stays 66.67; the tempo field shows it rounded). In a DAW that gives its
+beats and its tempo (`status.host` and `status.hostTempo`) a file keeps its written beats and the
+DAW's tempo plays them, as before: there it is a region of the DAW's tempo map. A host that gives a
+beat position without a tempo (perhaps Dorico) is treated like the standalone app.
+
+**MuseScore Studio 4 (checked in its source, v4.6.5 to v4.7.5).**
+- Its VST3 `ProcessContext` carries only the sample position (`projectTimeSamples`, its playback
+  timeline), the sample rate, and from 4.7 the playing flag: no tempo, no beat position, no time
+  signature. JUCE still fills in a sample time and a playing flag when a host sends neither.
+- It sets plugins active only while playback runs (after any count-in): stopped, it does not call
+  them at all.
+- **What Novox does:** while a VST3 host that has never given a beat position plays, Novox follows
+  its sample clock (`status.clock` = `"samples"`; DAWs report `"beats"`, the standalone app
+  `"own"`): seconds = samples / sample rate from the start of the score, turned into song beats at
+  the song's tempo. A host plays when it says so (MuseScore 4.7 sends the flag; a host that has
+  sent it once is trusted from then on). MuseScore 4.6 sends none, so in MuseScore (known by its
+  app's path) a block that carries on from the last one counts as playing: 4.6 gives a block the
+  position of its end in whole microseconds, counted a little short, and the parts of a block it
+  splits at a note event the same position, so a position within max(16, block/8) samples of where
+  the last block ended, or the same one again, carries on, and Novox keeps its own count of
+  samples, nudged a sample at a time toward MuseScore's when they drift apart. The first block
+  after a start or a jump is silent on 4.6. MuseScore makes no last call when it stops: Novox stops
+  counting it as playing once no block has come for 0.2 s. Any other VST3 host keeps Novox's own
+  transport while it doesn't say it plays (a host whose clock runs while stopped would otherwise
+  play the song). A host that has given a beat position is a DAW and never uses this path, and
+  neither does an AU: JUCE hands an AU host without transport callbacks (auval, live-audio apps)
+  its free-running render clock, which would read as playing.
+  `NovoxPluginTests` covers it with a fake playhead that has no beat position.
+- **In the editor:** in MuseScore `status.clock` is `"samples"` from the start. Play, the ruler,
+  and Space when its key press can't be passed to MuseScore say "Start playback in your notation
+  app; Novox follows it"; MMC is not used. While MuseScore is stopped, note previews and Compare
+  are silent: the first preview and the LCD's tooltip say so. A DAW that has not run Novox yet
+  (Logic, for a track it isn't playing) gets the same treatment: Play and previews say to start
+  its playback.
+- MuseScore 4.7 also follows MMC from MIDI inputs and from a VST3's SysEx output. Novox sends MMC
+  only on its CoreMIDI port (no plugin MIDI output), and only does so in DAWs. Untested.
+- Its MusicXML export writes ritardando, accelerando and fermatas as text only, so after one of
+  them Novox runs ahead of MuseScore's playback. Its MIDI export ("Expand repeats") carries them in
+  its tempo map; importing that MIDI file instead keeps time with MuseScore, but its lyrics have
+  every verse on every pass.
+
+**Dorico (from Steinberg staff forum posts; not checked in a running copy).**
+- Since 4.3 Dorico sends plugins the flow's first tempo and a beat position derived from it, so
+  Novox follows it as it does a DAW (`"beats"`). Staff posts disagree about whether a tempo is sent
+  outside fixed-tempo mode; with tempo changes the beat position appears to count at the first
+  tempo, which is what placing a score by time at its first tempo matches.
+- Dorico exports one MusicXML file per flow; import the flow you play.
+
+### Notation app test checklist
+
+- [ ] **Load.** MuseScore 4.7: Mixer › the staff's instrument slot › VST3 › Novox The Robot (delete
+      `known_audio_plugins.json` to rescan). Dorico: Play mode, add Novox as a VST instrument and
+      route the vocal staff to it. Check the editor opens, resizes, and takes typing in the Lyrics
+      box without triggering the host's shortcuts.
+- [ ] **Import.** Export the same score compressed and uncompressed, import both; check the lyrics
+      sit one syllable per note, the part / voice / verse bar appears for a piano-vocal score, and
+      a one-note word like "fire" stays on its note.
+- [ ] **MuseScore playback.** Play from the start, from the middle and after a loop; Novox should
+      sound in time and stop with MuseScore. View should show "clock: samples". Try MuseScore 4.6
+      (no playing flag) if available, a count-in, the playback-speed slider (does
+      `projectTimeSamples` follow it?) and audio export (offline: does Novox render in time?).
+- [ ] **Tempo change.** A score that changes tempo mid-way: Novox should stay with MuseScore (and
+      Dorico) after the change; rit./fermata are expected to drift.
+- [ ] **Dorico playback** in follow-tempo and fixed-tempo modes, with a tempo change, a repeat and
+      a pickup; note what the beat position does after the change, and whether View's status has
+      a host tempo (`hostTempo`; without one, an imported score is placed by time at its first tempo).
+- [ ] **Other VST3 hosts without a beat position** (Gig Performer, Element, Carla): Novox's own Play
+      should work while the host is stopped, and follow the host only while it says it plays.
+- [ ] **Microphone.** MuseScore's Info.plist has no microphone usage description: record singing
+      once and see whether macOS refuses or quits MuseScore.

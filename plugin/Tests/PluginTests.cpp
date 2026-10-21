@@ -38,12 +38,15 @@ int failures = 0, checks = 0;
 struct FakePlayHead : juce::AudioPlayHead {
   double ppq = 0, bpm = 120;
   bool playing = true;
+  bool beats = true;  // false: a host that gives no beat position or tempo (MuseScore 4)
   juce::Optional<int64_t> sampleTime;
   juce::Optional<double> seconds, editOrigin;
   juce::Optional<PositionInfo> getPosition() const override {
     PositionInfo p;
-    p.setPpqPosition(ppq);
-    p.setBpm(bpm);
+    if (beats) {
+      p.setPpqPosition(ppq);
+      p.setBpm(bpm);
+    }
     if (sampleTime) p.setTimeInSamples(*sampleTime);
     if (seconds) p.setTimeInSeconds(*seconds);
     if (editOrigin) p.setEditOriginTime(*editOrigin);
@@ -1417,6 +1420,277 @@ int main(int argc, char** argv) {
     CHECK(error.isEmpty() && imported["units"].toString()=="beats");
     auto* notes=imported["notes"].getArray();
     CHECK(notes && notes->size()==1 && std::fabs(static_cast<double>((*notes)[0]["start"])-28)<1e-6);
+  }
+
+  // A VST3 host with no beat position (MuseScore 4: its sample position, from 4.7 a playing flag,
+  // and calls only while it plays) is followed by its sample clock while it plays: seconds from its
+  // start at the song's own tempo, which an imported score sets unrounded. A host that has given a
+  // beat position is a DAW and keeps the beats path; the standalone app and AUs keep their own
+  // transport, and so does any other VST3 host while it doesn't say it plays.
+  {
+    juce::AudioProcessor::setTypeOfNextNewPlugin(juce::AudioProcessor::wrapperType_VST3);
+    NovoxProcessor vst;
+    juce::AudioProcessor::setTypeOfNextNewPlugin(juce::AudioProcessor::wrapperType_Undefined);
+    CHECK(!vst.hostIsMuseScore() && juce::String(vst.getStatus().clock) == "own");
+    vst.setNotationHost(true);  // as in MuseScore, known by its path
+    FakePlayHead score;  // the notation app
+    score.beats = false;
+    score.playing = false;
+    vst.setPlayHead(&score);
+    vst.setRateAndBufferSizeDetails(48000, 512);
+    vst.prepareToPlay(48000, 512);
+    vst.setSongJson(songJson);
+    vst.setPreviewTempo(66.67);
+    waitForRender(vst);
+    // Not called yet: MuseScore's clock all the same (its Play and ruler say to play the score).
+    CHECK(vst.inDaw() && juce::String(vst.getStatus().clock) == "samples" && !vst.getStatus().playing);
+    // Not called while stopped: a changed tempo renders once, not on every timer tick.
+    const int started = vst.getStatus().rendersStarted;
+    pump(0.3);
+    CHECK(vst.getStatus().rendersStarted == started && std::fabs(vst.getStatus().bpm - 66.67) < 1e-9);
+    novox_engine* engine = novox_create(48000);
+    novox_stream* stream = novox_stream_create(engine, Song::fromJson(songJson).toScoreJson(66.67).toRawUTF8());
+    const auto lead = static_cast<size_t>(std::llround(novox_stream_lead(stream) * 48000));
+    std::vector<float> reference(novox_stream_length(stream));
+    novox_stream_process(stream, reference.data(), reference.size());
+    novox_stream_destroy(stream);
+    novox_destroy(engine);
+    juce::AudioBuffer<float> buf(2, 512);
+    juce::MidiBuffer midi;
+    // One host block of `n` samples reported at sample `at`; how far it is from the engine's render
+    // at sample `heard` (where Novox should be: `at` unless it keeps its own count).
+    const auto block = [&](int64_t at, int n = 512, int64_t heard = -1) {
+      score.sampleTime = at;
+      buf.setSize(2, n, false, false, true);
+      vst.processBlock(buf, midi);
+      float diff = 0;
+      for (int i = 0; i < n; ++i) {
+        const size_t k = lead + static_cast<size_t>(heard >= 0 ? heard : at) + static_cast<size_t>(i);
+        diff = std::max(diff, std::fabs(buf.getSample(0, i) - (k < reference.size() ? reference[k] : 0.0f)));
+      }
+      return diff;
+    };
+    const auto silent = [&] { return rms({buf.getReadPointer(0), buf.getReadPointer(0) + buf.getNumSamples()}) == 0.0f; };
+    // MuseScore 4.6 sends no playing flag: the first block can't tell, the next one carries straight on.
+    block(24000);
+    auto st = vst.getStatus();
+    CHECK(juce::String(st.clock) == "samples" && !st.playing && !st.hostTransport && silent());
+    float diff = 0;
+    std::vector<float> heard;
+    for (int b = 1; b <= 40; ++b) {
+      diff = std::max(diff, block(24000 + b * 512));
+      heard.insert(heard.end(), buf.getReadPointer(0), buf.getReadPointer(0) + 512);
+    }
+    st = vst.getStatus();
+    std::cout << "  sample clock max diff " << diff << "\n";
+    CHECK(st.playing && rms(heard) > 0.01f && diff < 1e-6f);
+    CHECK(std::fabs(st.beats - (24000 + 40 * 512) / 48000.0 * 66.67 / 60) < 1e-9 &&
+          std::fabs(st.seconds - (24000 + 40 * 512) / 48000.0) < 1e-9);
+    // 4.6 rounds its position to whole microseconds, and gives the parts of a block split at a note
+    // event the same one: Novox keeps its own count, without a gap or a jump.
+    int64_t at = 24000 + 41 * 512;
+    diff = 0;
+    for (int b = 0; b < 30; ++b, at += 512) {
+      const int64_t jitter = b % 3 == 0 ? 2 : b % 3 == 1 ? -1 : 0;
+      if (b % 5 == 4) {
+        diff = std::max(diff, block(at + jitter, 200, at));
+        CHECK(!silent());
+        diff = std::max(diff, block(at + jitter, 312, at + 200));
+      } else {
+        diff = std::max(diff, block(at + jitter, 512, at));
+      }
+      CHECK(vst.getStatus().playing && !silent());
+    }
+    CHECK(diff < 1e-6f);
+    // 4.6 counts each block in whole microseconds (10666 of 10666.67 for 512 samples) and reports
+    // it in float seconds: half a minute on, Novox still follows, within a few samples of its clock.
+    {
+      const int64_t from = 24000 + 71 * 512;
+      bool followed = true;
+      double furthest = 0;
+      for (int64_t k = 0; k < 3000; ++k) {
+        const int64_t micros = from * 1000000 / 48000 + k * (512 * 1000000 / 48000);
+        block(static_cast<int64_t>(static_cast<float>(micros) / 1000000.f * 48000));
+        const auto now = vst.getStatus();
+        followed = followed && now.playing;
+        furthest = std::max(furthest, std::fabs(now.seconds * 48000 - static_cast<double>(score.sampleTime.orFallback(0))));
+      }
+      std::cout << "  4.6 clock: furthest " << furthest << " samples from the host's\n";
+      CHECK(followed && furthest <= 16);
+    }
+    // Stopped: MuseScore calls the plugin no more, and makes no last call. Novox stops counting it
+    // as playing within a few timer ticks, so note previews and Compare sound again.
+    pump(0.4);
+    CHECK(!vst.getStatus().playing && juce::String(vst.getStatus().clock) == "samples");
+    // A host that repeats one position for longer than a split block isn't playing.
+    for (int b = 0; b < 12; ++b) block(60000);
+    CHECK(!vst.getStatus().playing && silent());
+    // MuseScore 4.7's playing flag: it sounds from the first block, also after a jump ...
+    score.playing = true;
+    diff = block(96000);
+    for (int b = 1; b < 8; ++b) diff = std::max(diff, block(96000 + b * 512));
+    CHECK(vst.getStatus().playing && diff < 1e-6f);
+    // ... and its last call says it stopped, even though the block carries on.
+    score.playing = false;
+    block(96000 + 8 * 512);
+    CHECK(!vst.getStatus().playing && silent() && juce::String(vst.getStatus().clock) == "samples");
+    block(96000 + 9 * 512);
+    CHECK(!vst.getStatus().playing);  // the flag is trusted from now on
+    // MIDI capture lands on the song's beats from the sample clock: 2 s at 66.67 bpm.
+    score.playing = true;
+    vst.setCaptureArmed(true);
+    midi.addEvent(juce::MidiMessage::noteOn(1, 69, 0.8f), 0);
+    block(96000);
+    midi.clear();
+    midi.addEvent(juce::MidiMessage::noteOff(1, 69), 0);
+    block(96000 + 24000);
+    midi.clear();
+    vst.setCaptureArmed(false);
+    pump(0.2);
+    bool captured = false;
+    for (const auto& note : Song::fromJson(vst.getSongJson()).notes)
+      captured = captured || (note.pitch == 69 && std::fabs(note.start - 2 * 66.67 / 60) < 1e-6 && std::fabs(note.dur - 0.5 * 66.67 / 60) < 1e-6);
+    CHECK(captured);
+    // A host that gives a beat position is a DAW: its blocks without one fall back to the own
+    // transport, as before, never the sample clock.
+    score.beats = true;
+    score.ppq = 4;
+    block(0);
+    CHECK(juce::String(vst.getStatus().clock) == "beats" && vst.getStatus().hostTransport && vst.getStatus().hostTempo);
+    score.beats = false;
+    score.playing = false;
+    block(512);
+    block(1024);
+    CHECK(juce::String(vst.getStatus().clock) == "own" && !vst.getStatus().playing && !vst.getStatus().hostTempo);
+  }
+  // Any other VST3 host that gives no beat position: its sample clock only while it says it plays,
+  // else Novox's own transport, which plays from its Play button as it did before.
+  {
+    juce::AudioProcessor::setTypeOfNextNewPlugin(juce::AudioProcessor::wrapperType_VST3);
+    NovoxProcessor vst;
+    juce::AudioProcessor::setTypeOfNextNewPlugin(juce::AudioProcessor::wrapperType_Undefined);
+    FakePlayHead live;  // a live-hosting app: its sample counter runs, it never says it plays
+    live.beats = false;
+    live.playing = false;
+    vst.setPlayHead(&live);
+    vst.setRateAndBufferSizeDetails(48000, 512);
+    vst.prepareToPlay(48000, 512);
+    vst.setSongJson(songJson);
+    waitForRender(vst);
+    juce::AudioBuffer<float> buf(2, 512);
+    juce::MidiBuffer midi;
+    std::vector<float> heard;
+    const auto blocks = [&](int64_t from, int count) {
+      heard.clear();
+      for (int b = 0; b < count; ++b) {
+        live.sampleTime = from + b * 512;
+        vst.processBlock(buf, midi);
+        heard.insert(heard.end(), buf.getReadPointer(0), buf.getReadPointer(0) + 512);
+      }
+    };
+    blocks(480000, 20);
+    CHECK(juce::String(vst.getStatus().clock) == "own" && !vst.getStatus().playing && rms(heard) == 0.0f);
+    vst.setPreviewPlaying(true);
+    blocks(480000 + 20 * 512, 200);
+    CHECK(juce::String(vst.getStatus().clock) == "own" && vst.getStatus().playing && rms(heard) > 0.01f);
+    vst.setPreviewPlaying(false);
+    // Saying it plays, it is followed by its clock; stopped again, the own transport is back.
+    live.playing = true;
+    blocks(0, 4);
+    CHECK(juce::String(vst.getStatus().clock) == "samples" && vst.getStatus().playing);
+    live.playing = false;
+    blocks(4 * 512, 4);
+    CHECK(juce::String(vst.getStatus().clock) == "own" && !vst.getStatus().playing && rms(heard) == 0.0f);
+    pump(0.3);
+    CHECK(juce::String(vst.getStatus().clock) == "own");
+  }
+  {
+    // Outside a VST3 a playhead without beats is ignored, as before: in the standalone app (and
+    // these tests), and in an AU, whose host without transport callbacks (auval, live-audio apps)
+    // JUCE gives a free-running render clock that would read as playing.
+    juce::AudioBuffer<float> buf(2, 512);
+    juce::MidiBuffer midi;
+    FakePlayHead none;
+    none.beats = false;
+    none.playing = false;
+    NovoxProcessor app;
+    juce::AudioProcessor::setTypeOfNextNewPlugin(juce::AudioProcessor::wrapperType_AudioUnit);
+    NovoxProcessor au;
+    juce::AudioProcessor::setTypeOfNextNewPlugin(juce::AudioProcessor::wrapperType_Undefined);
+    for (auto* other : {&app, &au}) {
+      other->setPlayHead(&none);
+      other->prepareToPlay(48000, 512);
+      for (int b = 0; b < 4; ++b) {
+        none.sampleTime = 4800 + b * 512;
+        other->processBlock(buf, midi);
+      }
+      CHECK(juce::String(other->getStatus().clock) == "own" && !other->getStatus().playing);
+    }
+    CHECK(!app.inDaw() && au.inDaw());
+  }
+
+  // Compressed MusicXML (.mxl) as MuseScore and Dorico export it: unzipped in the plugin (the
+  // rootfile META-INF/container.xml names, else the first score inside) and imported with its own
+  // lyrics, one syllable per note: the song's lyric line is not echoed back.
+  {
+    const auto note = [](const char* step, const char* syllabic, const char* text) {
+      return juce::String("<note><pitch><step>") + step + "</step><octave>4</octave></pitch><duration>1</duration>"
+             "<voice>1</voice><lyric number=\"1\"><syllabic>" + syllabic + "</syllabic><text>" + text + "</text></lyric></note>";
+    };
+    const auto score = [](const juce::String& notes) {
+      return R"(<?xml version="1.0" encoding="UTF-8"?><score-partwise version="4.0"><part-list><score-part id="P1">)"
+             R"(<part-name>Voice</part-name></score-part></part-list><part id="P1"><measure number="1"><attributes>)"
+             R"(<divisions>1</divisions></attributes><sound tempo="66.67"/>)" + notes + "</measure></part></score-partwise>";
+    };
+    const auto song = score(note("C", "single", "the") + note("D", "single", "fire") + note("E", "begin", "burn") + note("F", "end", "ing"));
+    const auto other = score(note("G", "single", "decoy"));
+    const juce::String container = R"(<?xml version="1.0" encoding="UTF-8"?><container><rootfiles>)"
+                                   R"(<rootfile full-path="score/Song.musicxml" media-type="application/vnd.recordare.musicxml+xml"/>)"
+                                   R"(</rootfiles></container>)";
+    const auto zip = [](const std::vector<std::pair<juce::String, juce::String>>& entries) {
+      juce::ZipFile::Builder builder;
+      for (const auto& [name, text] : entries)
+        builder.addEntry(std::make_unique<juce::MemoryInputStream>(text.toRawUTF8(), text.getNumBytesAsUTF8(), true), 9, name,
+                         juce::Time(2026, 9, 21, 12, 0));
+      juce::MemoryBlock out;
+      {
+        juce::MemoryOutputStream stream(out, false);
+        builder.writeToStream(stream, nullptr);
+      }
+      return out;
+    };
+    const auto lyricsOf = [](const juce::var& imported) {
+      juce::StringArray sung;
+      if (const auto* notes = imported["notes"].getArray())
+        for (const auto& n : *notes) sung.add(n["lyric"].toString());
+      return sung.joinIntoString(" ");
+    };
+    juce::String error;
+    // The container names the score; a decoy listed before it is not read.
+    const auto mxl = zip({{"mimetype", "application/vnd.recordare.musicxml"}, {"aaa.xml", other},
+                          {"META-INF/container.xml", container}, {"score/Song.musicxml", song}});
+    CHECK(mxl.getSize() > 4 && mxl[0] == 'P' && mxl[1] == 'K');
+    const auto unzipped = NovoxProcessor::musicXmlFromMxl(mxl, error);
+    CHECK(error.isEmpty() && unzipped.toString() == song);
+    auto imported = juce::JSON::parse(p.importFile(mxl, "hel-lo world", error));
+    CHECK(error.isEmpty() && imported["units"].toString() == "beats" && !imported.hasProperty("lyrics"));
+    CHECK(lyricsOf(imported) == "the fire burn- ing");
+    CHECK(imported["import"]["format"].toString() == "musicxml" && static_cast<bool>(imported["import"]["fileLyrics"]));
+    CHECK(std::fabs(static_cast<double>(imported["tempo"]) - 66.67) < 1e-9);
+    // Without a container: the first score outside META-INF.
+    imported = juce::JSON::parse(p.importFile(zip({{"META-INF/other.txt", "x"}, {"Song.xml", song}, {"zzz.musicxml", other}}), "", error));
+    CHECK(error.isEmpty() && lyricsOf(imported) == "the fire burn- ing");
+    // The editor's part, voice and verse choice reaches the engine; a bad one comes back as its error.
+    imported = juce::JSON::parse(p.importFile(mxl, "", error, juce::JSON::parse(R"({"track": 0, "partVoice": "1", "verse": 1})")));
+    CHECK(error.isEmpty() && lyricsOf(imported) == "the fire burn- ing" && imported["import"]["partVoice"].toString() == "1");
+    CHECK(p.importFile(mxl, "", error, juce::JSON::parse(R"({"track": 3})")).isEmpty() && error.contains("part 3"));
+    // Errors say what is wrong instead of an empty result.
+    const char junk[] = "PK not really a zip";
+    CHECK(p.importFile(juce::MemoryBlock(junk, sizeof(junk)), "", error).isEmpty() && error.contains(".mxl"));
+    CHECK(p.importFile(zip({{"META-INF/container.xml", container}, {"notes.txt", "la"}}), "", error).isEmpty() &&
+          error.contains("no MusicXML score"));
+    const char text[] = "hello";
+    CHECK(p.importFile(juce::MemoryBlock(text, 5), "", error).isEmpty() && error.isNotEmpty());
   }
 
   // 7. Plan and voices reach the UI.

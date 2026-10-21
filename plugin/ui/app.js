@@ -6,6 +6,7 @@ import { applyNoteLyrics } from "./note-lyrics.js";
 import { createMelodyClipboard, parseMelodyClipboard, melodyPasteConflicts, applyMelodyPaste } from "./melody-clipboard.js";
 import { createLiveRangesCache, importSpan, isStarterSong, mergeImport, originalSegments, songTranscriptions } from "./song-merge.js";
 import { dawNames, importAccept, importRoute, isBrowserKey, keyNames, platformOf, platformText, playheadNotice, singingMessage, spaceToWebView } from "./platform.js";
+import { FOLLOWS_HOST, importOptions, importedSong, parseImportReply, parsePitch, scoreImportMessage } from "./score-import.js";
 // Novox The Robot plugin editor. Plain ES module, no dependencies.
 //
 // Sections:
@@ -27,15 +28,6 @@ const NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const BLACK = new Set([1, 3, 6, 8, 10]);
 const isBlack = (m) => BLACK.has(((m % 12) + 12) % 12);
 const pitchName = (m) => NAMES[((Math.round(m) % 12) + 12) % 12] + (Math.floor(Math.round(m) / 12) - 1);
-const STEPS = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 };
-function parsePitch(p) {
-  if (typeof p === "number") return Math.round(p);
-  const m = /^([A-Ga-g])([#b]*)(-?\d+)$/.exec(String(p).trim());
-  if (!m) return NaN;
-  let n = STEPS[m[1].toLowerCase()] + 12 * (+m[3] + 1);
-  for (const c of m[2]) n += c === "#" ? 1 : -1;
-  return n;
-}
 function fmtPos(b) {
   b = Math.max(0, b);
   const bar = Math.floor(b / 4) + 1, beat = Math.floor(b % 4) + 1, six = Math.floor((b % 1) * 4 + 1e-6) + 1;
@@ -793,7 +785,20 @@ function previewNote(pitch) {
   clearTimeout(previewTimer);
   if (S.status.playing) return;
   previewTimer = setTimeout(()=>B.previewNote?.(pitch),45);
+  if (previewsSilent() && !silentPreviewSaid) {
+    silentPreviewSaid = true;
+    flash("PREVIEW SILENT", followsSamples() ? "your notation app is stopped" : "start playback in your host", 5000, silentDetail());
+  }
 }
+// A host that isn't calling the plugin now: a notation app followed by its clock (MuseScore, stopped),
+// or one that hasn't run Novox yet (a DAW before it plays this track). What Novox plays on its own
+// (note previews, Compare) is not heard. Said once on a note preview, and on the LCD's tooltip.
+const SILENT_PREVIEWS = "Your notation app runs Novox only while it plays: note previews and Compare are silent while it is stopped.";
+const NOT_RUN_YET = "Your host has not run Novox yet: start its playback, and Novox follows it. Note previews and Compare are silent until then.";
+const hostSilent = () => inDaw() && !S.status.host && !(S.status.blocks > 0);
+const previewsSilent = () => (followsSamples() || hostSilent()) && !hostLive();
+const silentDetail = () => (followsSamples() ? SILENT_PREVIEWS : NOT_RUN_YET);
+let silentPreviewSaid = false;
 function beginDrag(d) {
   if (d.mode === "move") {
     checkpoint();
@@ -944,10 +949,12 @@ sc.addEventListener("wheel", (e) => onWheel(e, "grid"), { passive: false });
 els.keys.addEventListener("wheel", (e) => onWheel(e, "keys"), { passive: false });
 els.ruler.addEventListener("wheel", (e) => onWheel(e, "ruler"), { passive: false });
 // A click (or drag) on the ruler places the playhead on the grid: where Play starts and where Stop
-// returns. Inside a DAW a click moves the DAW's playhead over MMC (locateHost).
+// returns. Inside a DAW a click moves the DAW's playhead over MMC (locateHost); a notation app
+// followed by its sample clock only moves its own.
 els.ruler.addEventListener("pointerdown", (e) => {
   if (e.button !== 0 || e.ctrlKey) return;
   const beat = Math.max(0, snapB((e.offsetX + els.scroller.scrollLeft) / S.ppb));
+  if (followsSamples()) { followsHost("PLAYHEAD", "move it in your notation app"); return; }
   if (inDaw()) { requestLocate(beat); return; }
   els.ruler.setPointerCapture(e.pointerId);
   placePlayhead(e);
@@ -988,8 +995,17 @@ let spaceToPage = false;
 async function hostSpaceKey() {
   if (await B.hostSpace?.()) return;
   spaceToPage = true;
-  hintOnce("space", "SPACE", "Click your DAW to use Space");
+  // A notation app followed by its clock is told where playback starts instead.
+  if (followsSamples()) followsHost("NOVOX FOLLOWS PLAYBACK", "start it in your notation app");
+  else hintOnce("space", "SPACE", "Click your DAW to use Space");
 }
+// A host followed by its sample clock (status.clock "samples"): it gives plugins no beat position
+// and Novox follows its playback by time at the song's tempo. MuseScore 4 is one, and it runs
+// instruments only while it plays, so Novox can't move or start it, and previews are silent while
+// it is stopped.
+const followsSamples = () => S.status.clock === "samples";
+// The LCD line is short; its tooltip has the whole sentence.
+const followsHost = (state, line) => flash(state, line, 5000, FOLLOWS_HOST);
 // Whether the DAW is calling the plugin now.
 const hostLive = () => performance.now() - mmc.blocksAt < 400;
 function mmcSave(works) {
@@ -1007,7 +1023,11 @@ function requestLocate(beat) {
 }
 async function locateHost(beat, tries = 0) {
   const st = S.status;
-  if (!Number.isFinite(+st.seconds)) { flash("PLAYHEAD", "This DAW does not tell plugins its time"); return; }
+  if (!Number.isFinite(+st.seconds)) {
+    // A host that has not called the plugin yet (MuseScore runs it only while it plays) has said nothing.
+    flash("PLAYHEAD", st.blocks > 0 ? "This DAW does not tell plugins its time" : "Start playback in your DAW or notation app; Novox follows it");
+    return;
+  }
   const target = st.seconds + (beat - st.beats) * 60 / S.bpm;  // seconds from bar 1, as the DAW counts them
   const p = { beat, target, sent: target + mmc.offset, from: st.beats, fromSeconds: +st.seconds, blocks: st.blocks,
     playing: !!st.playing && hostLive(), live: hostLive(), at: performance.now(), tries, offset: mmc.offset, rate: mmc.rate };
@@ -1448,10 +1468,21 @@ function refreshLcd() {
     const n = noteAtBeat(st.beats), l = n && S.labels.get(n._id);
     line = l ? (l.kind === "hum" ? "♪ mmm…" : l.kind === "hold" ? `♪ ${l.syl?.text || ""} ~` : `♪ ${l.text}`) : "♪";
     if (st.capture) cls = "rec";
-  } else if (st.capture) { state = "CAPTURE ARMED"; line = st.host ? "play the DAW and your keyboard" : "press Play and your keyboard"; cls = "rec"; }
+  } else if (st.capture) {
+    state = "CAPTURE ARMED"; cls = "rec";
+    line = st.host ? "play the DAW and your keyboard" : followsSamples() ? "play the score and your keyboard" : "press Play and your keyboard";
+  }
   // Standalone shows the tempo as its own field at the end of this line.
   else {
     state = "READY"; line = `${vname} · ${st.host ? Math.round(S.bpm) + " bpm · " : ""}${S.song.notes.length} notes`;
+    if (followsSamples()) {
+      line = `${vname} · follows your notation app`;
+      if (!title) title = `Novox follows your notation app's playback by time, at the song's tempo (♩=${Math.round(S.bpm * 100) / 100}).` +
+        (previewsSilent() ? " " + SILENT_PREVIEWS.replace("Your notation app", "It") : "");
+    } else if (hostSilent()) {
+      line = `${vname} · start playback in your host`;
+      if (!title) title = NOT_RUN_YET;
+    }
     if (!title && stale.count) title = `The audio fell behind the edits ${stale.count}× this session (longest ${Math.round(stale.longest / 1000)} s, last at ${stale.last}).`;
   }
   if (els.lcd.title !== title) els.lcd.title = title;
@@ -1466,7 +1497,15 @@ function refreshLcd() {
 }
 
 // ---- transport + capture
-function togglePlay() { phraseMode=null;B.stopAudioReview?.();B.setTransport(!S.status.playing); }
+function togglePlay() {
+  if (followsSamples()) {
+    followsHost("NOVOX FOLLOWS PLAYBACK", `${S.status.playing ? "stop" : "start"} it in your notation app`);
+    return;
+  }
+  // A host that has not run the plugin yet would not run its own transport either.
+  if (hostSilent()) { flash("NOVOX FOLLOWS PLAYBACK", "start it in your host", 5000, NOT_RUN_YET); return; }
+  phraseMode=null;B.stopAudioReview?.();B.setTransport(!S.status.playing);
+}
 els.play.addEventListener("click", togglePlay);
 els.capture.addEventListener("click", () => {
   const on = !S.status.capture;
@@ -1487,12 +1526,19 @@ function refreshButtons() {
   els.capture.setAttribute("aria-pressed", !!st.capture);
   const help = $("captureHelp");
   help.hidden = !st.capture;
-  help.textContent = st.host ? dawNames("Start playback in Logic, then play your MIDI keyboard to add notes.", platformOf(st)) : "Press Play, then play your MIDI keyboard to add notes.";
+  help.textContent = st.host ? dawNames("Start playback in Logic, then play your MIDI keyboard to add notes.", platformOf(st))
+    : followsSamples() ? "Start playback in your notation app, then play your MIDI keyboard to add notes."
+    : "Press Play, then play your MIDI keyboard to add notes.";
   els.play.classList.toggle("on", !!st.playing);
   els.playIco.innerHTML = st.playing ? "&#9632;" : "&#9654;";
   els.playLbl.textContent = st.playing ? "Stop" : "Play";
+  els.play.title = followsSamples() ? FOLLOWS_HOST : "Play from the start (Space)";
   els.app.classList.toggle("host", !!st.host);
-  els.mode.textContent = (st.host ? "In host · the DAW drives tempo and transport" : "Standalone") + (B && B.isMock ? " · mock backend" : "");
+  els.mode.textContent = (st.host ? "In host · the DAW drives tempo and transport"
+    : followsSamples() ? "In a notation app · it drives the transport (clock: samples); the tempo is the song's"
+    : hostSilent() ? "In a host · waiting for it to run Novox (start its playback)"
+    : inDaw() ? "In a host that gives no beat position · Novox plays on its own"
+    : "Standalone") + (B && B.isMock ? " · mock backend" : "");
   const version = $("version"), v = st.version ? `Novox The Robot ${st.version} · free and open source · songaday.studio/plugins` : "";
   if (version && version.textContent !== v) version.textContent = v;
 }
@@ -1511,6 +1557,7 @@ $("clear").addEventListener("click", () => {
   S.song.useNoteLyrics = false;
   S.song.transcriptions = [];
   S.sel.clear();
+  closeImportBar();
   onSongChanged();
   flash("CLEARED", "notes removed · ⌘Z brings them back");
 });
@@ -1711,6 +1758,7 @@ async function acceptRecording(score, name, result, status = null) {
   // same notes if edited (refined with "~" marks once the plan arrives).
   S.song.notes = merged.notes;
   S.song.transcriptions = merged.transcriptions;
+  closeImportBar();  // a score's other parts would replace this recording's notes
   S.song.useNoteLyrics = true;
   S.song.lyrics = merged.lyrics;
   S.sel = merge ? new Set(notes.map(n => n._id)) : new Set();
@@ -1812,29 +1860,85 @@ async function importFileObj(file) {
   if (route.kind === "refuse") { flash("CAN’T IMPORT", route.line, 4000); return; }
   if (route.kind === "audio") return audioImport.open(file, S.song.voice, detailedNotes.checked, importStatus());
   flash("IMPORTING…", file.name);
-  let txt = "";
-  try { txt = await B.importFile(toBase64(new Uint8Array(await file.arrayBuffer())), S.song.lyrics); } catch (e) { console.warn(e); }
-  let score = null;
-  try { score = txt ? JSON.parse(txt) : null; } catch {}
-  if (!score || !Array.isArray(score.notes) || !score.notes.length) { flash("CAN'T IMPORT", `couldn't read notes from ${file.name}`); return; }
-  const tempo = +score.tempo || S.bpm;
-  const k = score.units === "beats" ? 1 : tempo / 60;
-  const notes = score.notes.map((n) => ({ pitch: parsePitch(n.pitch), start: (+n.start || 0) * k, dur: (+n.dur || 0) * k, lyric: n.lyric }))
-    .filter((n) => Number.isFinite(n.pitch) && n.dur > 0);
-  const lyr = typeof score.lyrics === "string" && score.lyrics.trim() ? score.lyrics : lyricsFromNotes(notes, { emptyNote: "hold" });
-  checkpoint();
-  S.song.notes = notes.map((n) => ({ pitch: clamp(n.pitch, 0, 127), start: Math.max(0, n.start), dur: n.dur, _id: nextId++ }));
-  S.song.useNoteLyrics = false;
+  let base64 = "";
+  try { base64 = toBase64(new Uint8Array(await file.arrayBuffer())); }
+  catch (e) { flash("CAN'T IMPORT", `couldn't read ${file.name}`, 6000); return; }
+  closeImportBar();
+  // The Lyrics box as it was: what a part without lyrics sings, also when the picker imports again.
+  await importScore({ base64, name: file.name, lyrics: S.song.lyrics }, {});
+}
+// ---- MIDI and MusicXML (score-import.js). The notes keep the file's own lyrics, one syllable each
+// (a file without lyrics sings the Lyrics box), the engine's errors and warnings reach the LCD, and
+// a file with several parts, voices or verses opens the import bar to sing another: each choice
+// imports the file again. Right after an import (the notes as it left them) a choice replaces it
+// within its Undo step; after an edit it is an Undo step of its own.
+let lastScore = null;  // {base64, name, lyrics: the Lyrics box before it, choices, key: notesKey of the song it left}
+async function importScore(source, options) {
+  let reply;
+  try { reply = parseImportReply(await B.importFile(source.base64, source.lyrics ?? "", options)); }
+  catch (e) { reply = { error: String(e?.message || e) }; }
+  if (reply.error) { flash("CAN'T IMPORT", `${source.name}: ${reply.error}`, 8000, `${source.name}: ${reply.error}`); return false; }
+  // A DAW that gives its beats and tempo plays the file's beats at its own tempo, as it always has.
+  const dawTempo = !!S.status.host && S.status.hostTempo !== false;
+  const song = importedSong(reply.score, { followsHostBeats: dawTempo, bpm: S.bpm });
+  if (!song.notes.length) { flash("CAN'T IMPORT", `${source.name} has no notes to sing`, 6000); return false; }
+  if (!(lastScore && lastScore.base64 === source.base64 && lastScore.key === notesKey(S.song))) checkpoint();
+  S.song.notes = song.notes.map((n) => ({ pitch: n.pitch, start: n.start, dur: n.dur, ...(n.lyric ? { lyric: n.lyric } : {}), _id: nextId++ }));
+  S.song.useNoteLyrics = song.noteLyrics;
   S.song.transcriptions = [];
-  if (lyr) S.song.lyrics = lyr;
+  // The notes' own syllables sing; the box shows them as text that flows back onto the same notes
+  // if edited (with "~" on one-note words like "fire~" once the plan arrives).
+  if (song.noteLyrics) S.song.lyrics = lyricsFromNotes(S.song.notes) ?? "";
+  else if (song.lyrics) S.song.lyrics = song.lyrics;
   S.sel.clear();
   resolveOverlaps();
   onSongChanged({ lyrics: true });
-  if (!S.status.host && score.tempo) B.setTempo(Math.round(tempo));
+  // The song's tempo is the file's first, unrounded (66.67 stays 66.67), where the host gives none
+  // (standalone, MuseScore, Dorico if it sends no tempo); a DAW's own tempo wins, as before.
+  if (song.tempo && !dawTempo) B.setTempo(song.tempo);
   zoomFit();
   scrollToNotes();
-  flash("IMPORTED ✓", `${S.song.notes.length} notes from ${file.name}`);
+  lastScore = { ...source, choices: song.choices, key: notesKey(S.song) };
+  showImportBar();
+  const m = scoreImportMessage(song, source.name);
+  flash(m.state, m.line, song.warnings.length ? 6000 : 2600, m.detail);
+  return true;
 }
+// The import bar: Part, Voice and Verse menus for the last score imported (hidden while it has a
+// single one of each), and Done.
+const importBar = { bar: $("importBar"), name: $("importName"), done: $("importDone"),
+  menus: { part: $("importPart"), voice: $("importVoice"), verse: $("importVerse") } };
+function showImportBar() {
+  const c = lastScore?.choices;
+  importBar.bar.hidden = !c;
+  if (!c) return;
+  importBar.name.textContent = lastScore.name;
+  const lists = { part: [c.parts, c.part], voice: [c.voices, c.partVoice], verse: [c.verses, c.verse] };
+  for (const [key, menu] of Object.entries(importBar.menus)) {
+    const [options, value] = lists[key];
+    menu.closest("label").hidden = !options.length;
+    menu.innerHTML = "";
+    for (const o of options) menu.add(new Option(o.label, String(o.value), false, String(o.value) === String(value)));
+  }
+}
+function closeImportBar() {
+  const focused = importBar.bar.contains(document.activeElement);
+  lastScore = null;
+  importBar.bar.hidden = true;
+  if (focused) els.scroller.focus();
+}
+for (const [key, menu] of Object.entries(importBar.menus)) {
+  menu.addEventListener("change", async () => {
+    if (!lastScore?.choices) return;
+    const source = lastScore, options = importOptions(source.choices, key, menu.value);
+    for (const m of Object.values(importBar.menus)) m.disabled = true;
+    flash("IMPORTING…", source.name);
+    try { await importScore(source, options); }
+    finally { for (const m of Object.values(importBar.menus)) m.disabled = false; showImportBar(); }
+  });
+}
+importBar.done.addEventListener("click", closeImportBar);
+importBar.bar.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); closeImportBar(); } });
 els.file.addEventListener("change", () => { importFileObj(els.file.files[0]); els.file.value = ""; });
 $("importBtn").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); els.file.click(); } });
 let dragDepth = 0;
@@ -1886,6 +1990,9 @@ function onStatus(s) {
   S.status = st;
   if (st.platform !== prev.platform) applyPlatform(st);
   if (st.daw || st.host) checkMmc(st, prev);
+  // A notation app followed by its clock plays only while it calls the plugin: MuseScore makes no
+  // last call when it stops (the plugin also stops counting it as playing a moment later).
+  if (st.clock === "samples" && st.playing && !hostLive()) st.playing = false;
   trackStale(st);
   if (+st.bpm > 0 && Math.abs(st.bpm - S.bpm) > 1e-3) {
     S.bpm = +st.bpm;
@@ -1897,7 +2004,8 @@ function onStatus(s) {
     const t = String(Math.round(S.bpm));
     if (els.tempo.value !== t) els.tempo.value = t;
   }
-  if (prev.capture !== st.capture || prev.playing !== st.playing || prev.host !== st.host) refreshButtons();
+  if (prev.capture !== st.capture || prev.playing !== st.playing || prev.host !== st.host || prev.clock !== st.clock ||
+      !prev.blocks !== !st.blocks) refreshButtons();
   if (S.loaded && st.songVersion !== S.seenVersion) { S.seenVersion = st.songVersion; pullSong(); }
   if (st.playing || prev.playing || st.beats !== prev.beats) {
     // follow the playhead
@@ -2108,6 +2216,7 @@ function drawSourceWave() {
 async function hearPhrase(original) {
   const [begin,end]=phraseBounds();if(end<=begin) return flash("SELECT A PHRASE","Add notes before listening");
   if(S.status.playing) return flash("STOP PLAYBACK","Stop playback before comparing a phrase");
+  if(previewsSilent()) flash("COMPARE SILENT",followsSamples() ? "your notation app is stopped" : "start playback in your host",5000,silentDetail());
   const loop=$("phraseLoop").checked;
   try {
     let error;

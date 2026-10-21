@@ -179,6 +179,7 @@ juce_add_binary_data(NovoxUiData SOURCES
   ui/note-shaping.js
   ui/song-merge.js
   ui/platform.js
+  ui/score-import.js
   ui/backend.js
   ui/style.css
   ${CMAKE_CURRENT_BINARY_DIR}/ui/juce.js

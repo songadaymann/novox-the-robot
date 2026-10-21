@@ -329,11 +329,21 @@ juce::WebBrowserComponent::Options NovoxEditor::makeOptions() {
                                a.size() > 3 && static_cast<bool>(a[3]), a.size() > 4 && static_cast<bool>(a[4])));
         pendingAudio_.reset();
       })
+      // (base64 of a MIDI, MusicXML or .mxl file, the lyric line for a file without lyrics,
+      // {track, partVoice, verse}): the engine's score JSON, or {"error"} saying why it failed.
       .withNativeFunction("importFile", [&p](const Args& a, Completion done) {
         juce::MemoryBlock data;
-        if (a.size() > 0) { juce::MemoryOutputStream decoded(data, false); juce::Base64::convertFromBase64(decoded, a[0].toString()); decoded.flush(); }
-        juce::String error;
-        juce::String score = p.importFile(data, a.size() > 1 ? a[1].toString() : juce::String(), error);
+        juce::String error, score;
+        if (a.size() > 0) {
+          juce::MemoryOutputStream decoded(data, false);
+          if (!juce::Base64::convertFromBase64(decoded, a[0].toString())) error = "Could not decode the file";
+        }
+        if (error.isEmpty()) score = p.importFile(data, a.size() > 1 ? a[1].toString() : juce::String(), error, a.size() > 2 ? a[2] : juce::var());
+        if (error.isNotEmpty() || score.isEmpty()) {
+          auto* reply = new juce::DynamicObject();
+          reply->setProperty("error", error.isNotEmpty() ? error : juce::String("Could not read the file"));
+          score = juce::JSON::toString(juce::var(reply));
+        }
         done(score);
       });
 }
@@ -419,6 +429,8 @@ void NovoxEditor::timerCallback() {
   o->setProperty("bpm", s.bpm);
   o->setProperty("playing", s.playing);
   o->setProperty("host", s.hostTransport);
+  o->setProperty("hostTempo", s.hostTempo);
+  o->setProperty("clock", juce::String(s.clock));
   o->setProperty("capture", s.capture);
   o->setProperty("rendering", s.rendering);
   o->setProperty("error", s.error);
@@ -444,7 +456,8 @@ void NovoxEditor::timerCallback() {
     m->setProperty("rate", s.mmc.rate);
     o->setProperty("mmc", juce::var(m));
   }
-  static const juce::String hostName = juce::PluginHostType().getHostDescription();
+  // JUCE knows neither MuseScore nor Dorico ("Unknown").
+  static const juce::String hostName = NovoxProcessor::hostIsMuseScore() ? juce::String("MuseScore") : juce::PluginHostType().getHostDescription();
   o->setProperty("hostName", hostName);
   o->setProperty("platform", NovoxPlatform::name());
   static const juce::var imports = importTypes();

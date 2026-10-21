@@ -1,9 +1,12 @@
 # CLI and language-package releases
 
-`.github/workflows/release.yml` runs on a pushed `v*` tag. It uploads CLI archives
-to GitHub and publishes Python and npm packages. Running or rerunning it is a
-publication action, not a way to test local repairs. The Mac app/plugin installer
-has its own [packaging guide](../packaging/macos/README.md).
+`.github/workflows/release.yml` runs on a pushed `v*` tag and uploads the CLI archives
+to that tag's GitHub release. The Python and npm packages are published only when the
+workflow is run by hand with **packages** ticked (Actions › Release › Run workflow): their
+versions (`bindings/`) are their own, and an app release must not publish them by
+accident. Running or rerunning it is a publication action, not a way to test local
+repairs. The app/plugin installers have their own guides: [macOS](../packaging/macos/README.md)
+and [Windows](../packaging/windows/README.md).
 
 ## npm authentication
 

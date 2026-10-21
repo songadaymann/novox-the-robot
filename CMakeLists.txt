@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
-project(NovoxTheRobot VERSION 1.0.0 LANGUAGES C CXX)
+project(NovoxTheRobot VERSION 1.0.1 LANGUAGES C CXX)
 # What people see (the installer, the download page, the editor): the version plus a stage.
-set(NOVOX_VERSION_LABEL "1.0 beta" CACHE STRING "Release name shown to people")
+set(NOVOX_VERSION_LABEL "1.0 beta 2" CACHE STRING "Release name shown to people")
 if(APPLE)
   enable_language(OBJC OBJCXX)
 endif()

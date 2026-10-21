@@ -16,10 +16,19 @@ Goals:
 
 ## Download
 
-**Mac (Apple Silicon, macOS 13.3 or later): [songaday.studio/plugins](https://songaday.studio/plugins).**
-One installer adds the standalone app and the Audio Unit and VST3 instrument plugins (Logic Pro,
-GarageBand, Ableton Live, Reaper and other hosts). Pro Tools (AAX) is not supported. To build the
-installer yourself, see [`packaging/macos/README.md`](packaging/macos/README.md).
+**[songaday.studio/plugins](https://songaday.studio/plugins)**, for:
+
+- **Mac** (Apple Silicon, macOS 13.3 or later): one installer adds the standalone app and the Audio
+  Unit and VST3 instrument plugins (Logic Pro, GarageBand, Ableton Live, Reaper and other hosts).
+- **Windows** (10 or 11, 64-bit): one installer adds the standalone app and the VST3 (Ableton
+  Live, Reaper, Cubase, FL Studio, Bitwig and other hosts). Lyrics recognition needs a processor
+  with AVX2 (most PCs from 2015 on). The installer isn't signed yet: Windows says "Windows
+  protected your PC"; choose **More info › Run anyway**.
+
+Both work in MuseScore and Dorico too (VST3): see "Using Novox with MuseScore and Dorico" below.
+Pro Tools (AAX) is not supported. To build the installers yourself, see
+[`packaging/macos/README.md`](packaging/macos/README.md) and
+[`packaging/windows/README.md`](packaging/windows/README.md).
 
 ## Quick start (engine and CLI)
 

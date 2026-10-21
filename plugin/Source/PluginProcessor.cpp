@@ -607,7 +607,7 @@ juce::String NovoxProcessor::importFile(const juce::MemoryBlock& data, const juc
 }
 
 juce::MemoryBlock NovoxProcessor::musicXmlFromMxl(const juce::MemoryBlock& zip, juce::String& error) {
-  constexpr juce::int64 maxXml = 64 * 1024 * 1024;  // the editor's import limit, uncompressed
+  static constexpr juce::int64 maxXml = 64 * 1024 * 1024;  // the editor's import limit, uncompressed
   juce::MemoryInputStream in(zip, false);
   juce::ZipFile files(in);
   const auto read = [&files, &error](const juce::ZipFile::ZipEntry* entry) {
